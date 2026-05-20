@@ -36,42 +36,88 @@ export const RESOLUTION_OF = {
   NGOAI_LE:        { label: 'Xử lý ngoại lệ',      color: '#7c3aed', needsAction: true  },
 }
 
-/* ── Shared filter helper ───────────────────────────────────────────────────── */
+/* ── Shared filter helpers ──────────────────────────────────────────────────── */
 export const isT1 = r => r.swift?.txnDate !== r.swift?.date
+const ymd = s => s.split('/').reverse().join('')  // 'DD/MM/YYYY' → 'YYYYMMDD' (lexicographically comparable)
 
-/* ── Column definitions for each section — dùng chung MasterSummary + 3 trang đối soát ── */
-export const SWIFT_COLS = [
-  { label: 'Thành công – Core ngày T',   color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => r.swift?.status==='THANH_CONG' && !!r.core && !isT1(r) },
-  { label: 'Timeout – Core ngày T',      color:'#d97706', bg:'#fffbeb', border:'#fde68a', filterFn: r => r.swift?.status==='TIMEOUT'    && !!r.core && !isT1(r) },
-  { label: 'Thất bại – Core ngày T',     color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => r.swift?.status==='THAT_BAI'   && !!r.core && !isT1(r) },
-  { label: 'Thành công – Core ngày T+1', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => r.swift?.status==='THANH_CONG' && !!r.core &&  isT1(r) },
-  { label: 'Timeout – Core ngày T+1',    color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => r.swift?.status==='TIMEOUT'    && !!r.core &&  isT1(r) },
-  { label: 'Thất bại – Core ngày T+1',   color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe', filterFn: r => r.swift?.status==='THAT_BAI'   && !!r.core &&  isT1(r) },
+/* ── Column definitions — dùng chung MasterSummary + 3 trang đối soát ──────────
+   SPEC LOCKED tháng 5/2026 — KHÔNG tự đổi nhãn, thêm/bớt cột, hay dùng
+   recon_status để phân biệt T vs T+1 trong các cặp NAPAS/Core.
+
+   Quy ước T:
+   • Swift:      T = txnDate; T+1 khi txnDate ≠ hostDate (isT1)
+   • NAPAS Đi:   T = napas.date; T-1 khi napas.date < core.date (QT overnight)
+   • NAPAS Đến:  T = napas.date; Core T-1/T/T+1 so sánh tương đối
+   • Core:       T = core.date; NAPAS/Swift so sánh tương đối
+   • NAPAS không có timeout — chỉ TC (failed=false) và KTC (failed=true)   ──── */
+
+/* Swift ↔ Core chiều Đi — 6 cơ bản (TC/TO/TB × T/T+1) + Chỉ Swift
+   T = ngày GD thực tế (txnDate); T+1 = Core ghi nhận ngày tiếp theo (isT1) */
+export const SWIFT_COLS_DI = [
+  { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && !isT1(r) && !!r.core },
+  { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && isT1(r)  && !!r.core },
+  { label: 'Timeout – Core ngày T',       color:'#d97706', bg:'#fffbeb', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && !isT1(r) && !!r.core },
+  { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
+  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) && !!r.core },
+  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  && !!r.core },
+  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core },
 ]
 
+/* Swift ↔ Core chiều Đến — 6 trạng thái cơ bản (không có "Chỉ Swift" vì Swift là gốc) */
+export const SWIFT_COLS_DEN = [
+  { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && !isT1(r) && !!r.core },
+  { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && isT1(r)  && !!r.core },
+  { label: 'Timeout – Core ngày T',       color:'#d97706', bg:'#fffbeb', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && !isT1(r) && !!r.core },
+  { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
+  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) && !!r.core },
+  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  && !!r.core },
+]
+
+/* CoreSummary Ghi có — Core là gốc (T), Swift và NAPAS so sánh tương đối */
 export const CORE_COLS_DI = [
-  { label: 'Core ngày T – Swift ngày T-1',           color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.core &&  isT1(r) },
-  { label: 'Core ngày T – Swift ngày T',             color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.core && !isT1(r) && !!r.napas && !r.napas.failed },
-  { label: 'Swift ngày T – Core ngày T+1',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: _r => false, hidden: true },
-  { label: 'Thất bại – trace không phát sinh bên NAPAS', color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => r.swift?.status === 'THAT_BAI' },
+  { label: 'Swift ngày T-1 – NAPAS ngày T',    color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
+    filterFn: r => !!r.core && !!r.swift && !!r.napas && ymd(r.swift.date) < ymd(r.core.date) && r.napas.date === r.core.date },
+  { label: 'Swift ngày T – NAPAS ngày T',      color:'#059669', bg:'#f0fdf4', border:'#bbf7d0',
+    filterFn: r => !!r.core && !!r.swift && !!r.napas && r.swift.date === r.core.date && r.napas.date === r.core.date },
+  { label: 'Swift ngày T – NAPAS ngày T+1',    color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
+    filterFn: r => !!r.core && !!r.swift && !!r.napas && r.swift.date === r.core.date && ymd(r.napas.date) > ymd(r.core.date) },
+  { label: 'Thất bại – không có trên NAPAS',   color:'#dc2626', bg:'#fef2f2', border:'#fecaca',
+    filterFn: r => !!r.core && r.swift?.status === 'THAT_BAI' && !r.napas },
 ]
 
+/* CoreSummary Ghi nợ — Core là gốc (T), NAPAS so sánh tương đối */
 export const CORE_COLS_DEN = [
-  { label: 'Core ngày T – NAPAS ngày T-1',   color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.core &&  isT1(r) },
-  { label: 'Core ngày T – NAPAS ngày T',     color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.core && !isT1(r) && !!r.napas && !r.napas.failed },
-  { label: 'NAPAS ngày T – Core ngày T+1',   color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: _r => false, hidden: true },
+  { label: 'Core ngày T – NAPAS ngày T-1',   color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
+    filterFn: r => !!r.core && !!r.napas && ymd(r.napas.date) < ymd(r.core.date) },
+  { label: 'Core ngày T – NAPAS ngày T',     color:'#059669', bg:'#f0fdf4', border:'#bbf7d0',
+    filterFn: r => !!r.core && !!r.napas && r.napas.date === r.core.date },
+  { label: 'Core ngày T – NAPAS ngày T+1',   color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
+    filterFn: r => !!r.core && !!r.napas && ymd(r.napas.date) > ymd(r.core.date) },
+  { label: 'Core có – không có NAPAS',        color:'#d97706', bg:'#fffbeb', border:'#fde68a',
+    filterFn: r => !!r.core && !r.napas },
 ]
 
+/* NAPAS ↔ Core chiều Đi — NAPAS không có timeout, chỉ TC/KTC
+   Lệch ngày: NAPAS ghi nhận ngày T-1 (type=QT), Core booking ngày T */
 export const NAPAS_COLS_DI = [
-  { label: 'Thành công – Core ngày T-1', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.napas && !r.napas.failed && r.napas.type==='QT' },
-  { label: 'Thành công – Core ngày T',   color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.napas && !r.napas.failed && r.napas.type==='GD' && !!r.core },
-  { label: 'Không thành công',           color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.napas && r.napas.failed },
+  { label: 'Thành công – NAPAS ngày T-1, Core ngày T', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.napas.date) < ymd(r.core.date) },
+  { label: 'Thành công – NAPAS ngày T, Core ngày T',   color:'#059669', bg:'#f0fdf4', border:'#bbf7d0',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && r.napas.date === r.core.date },
+  { label: 'Không thành công (KTC)',                    color:'#dc2626', bg:'#fef2f2', border:'#fecaca',
+    filterFn: r => !!r.napas && r.napas.failed },
+  { label: 'Chỉ NAPAS TC – không có Core',              color:'#d97706', bg:'#fffbeb', border:'#fde68a',
+    filterFn: r => !!r.napas && !r.napas.failed && !r.core },
 ]
 
+/* NapasCore Đến — NAPAS là gốc (T), Core so sánh tương đối */
 export const NAPAS_COLS_DEN = [
-  { label: 'Thành công – Core ngày T-1', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.napas && !r.napas.failed && r.napas.type==='QT' && r.napas.date !== r.core?.date },
-  { label: 'Thành công – Core ngày T',   color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.napas && !r.napas.failed && r.napas.date === r.core?.date },
-  { label: 'Core không ghi nhận',        color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.napas && !r.napas.failed && !r.core },
+  { label: 'Thành công – Core ngày T-1',  color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.core.date) < ymd(r.napas.date) },
+  { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && r.core.date === r.napas.date },
+  { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.core.date) > ymd(r.napas.date) },
 ]
 
 /* ── Master data – 30 giao dịch thực tế 01–03/02/2026 ─────────────────────── */

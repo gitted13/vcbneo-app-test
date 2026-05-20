@@ -6,7 +6,8 @@ import { Input, Select } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
-import { RESOLUTION_OF, CORE_COLS_DI, CORE_COLS_DEN, isT1 } from '../../data/reconcile'
+import { RESOLUTION_OF, CORE_COLS_DI, CORE_COLS_DEN } from '../../data/reconcile'
+import { downloadDetailXlsx } from '../../utils/export'
 import { KpiBar, ResolveRow, SwiftStatusCell, NapasStatusCell, NapasTypeTag, StatusBadge, Dash } from '../../components/ReconShared'
 import { api } from '../../api/client'
 
@@ -55,7 +56,9 @@ export default function CoreSummary() {
   const [page, setPage]       = useState(1)
   const [pageSize, setPS]     = useState(30)
   const [activeKpi, setKpi]   = useState(null)
-  const [filterDay, setFD]    = useState('')
+  const { filterFrom, setFilterFrom: setFrom, filterTo, setFilterTo: setTo } = useApp()
+
+  const dayToISO = s => { const [d, m, y] = s.split('/'); return `${y}-${m}-${d}` }
 
   useEffect(() => {
     api.getRows()
@@ -80,25 +83,17 @@ export default function CoreSummary() {
   const dir = opt.dir
   const activeCols = entry === 'Ghi có' ? CORE_COLS_DI : CORE_COLS_DEN
 
-  const KPI_FN = {
-    khop:      r => r.recon_status === 'KHOP',
-    lech:      r => r.recon_status === 'KHOP_LECH_NGAY',
-    timeout:   r => r.recon_status === 'TIMEOUT_CO_CORE',
-    that_bai:  r => r.recon_status === 'SWIFT_THAT_BAI',
-    chi_swift: r => r.recon_status === 'CHI_SWIFT',
-  }
+  const KPI_FN = Object.fromEntries(activeCols.map((col, i) => [`col${i}`, col.filterFn]))
 
   const needsAction   = (r) => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by
+  const inRange       = r => (!filterFrom || !r.day || dayToISO(r.day) >= filterFrom)
+                          && (!filterTo   || !r.day || dayToISO(r.day) <= filterTo)
   const base          = rows.filter(r => r.direction === dir && r.core)
-  const days          = [...new Set(base.map(r => r.day))].filter(Boolean).sort()
-  const unmatchedBase = base.filter(r => !r.swift || !r.napas)
-  const needsActBase  = base.filter(r => needsAction(r))
-  const viewBase      = activeView === 'unmatched'    ? unmatchedBase
-                      : activeView === 'needs_action' ? needsActBase
-                      : base
+  const dateBase      = base.filter(inRange)
+  const unmatchedBase = dateBase.filter(r => !r.swift || !r.napas)
+  const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {
-    if (filterDay && r.day !== filterDay) return false
     if (search && !r.trace.includes(search) && !(r.sequence ?? '').includes(search)) return false
     if (activeView === 'all') {
       if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
@@ -111,34 +106,18 @@ export default function CoreSummary() {
     return true
   })
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
-  useEffect(() => { setPage(1); setFS(''); setFD(''); setKpi(null); setView('all') }, [entry])
-  useEffect(() => { setPage(1) }, [filterCol, activeKpi, search, activeView])
+  useEffect(() => { setPage(1); setFS(''); setFrom(''); setTo(''); setKpi(null); setView('all') }, [entry])
+  useEffect(() => { setPage(1) }, [filterCol, activeKpi, search, activeView, filterFrom, filterTo])
 
   /* KPI per spec */
-  let kpiItems
-  if (entry === 'Ghi có') {
-    const khop      = base.filter(r => r.recon_status === 'KHOP')
-    const lech      = base.filter(r => r.recon_status === 'KHOP_LECH_NGAY')
-    const timeout   = base.filter(r => r.recon_status === 'TIMEOUT_CO_CORE')
-    const thatBai   = rows.filter(r => r.direction === dir && r.recon_status === 'SWIFT_THAT_BAI' && !r.napas)
-    kpiItems = [
-      { label: 'Tổng Ghi có',          val: base.length,    color: opt.color, bg: opt.bg,    border: opt.border },
-      { label: 'Core ngày T – Swift ngày T',                      val: khop.length,    color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', onClick: () => toggleKpi('khop'),     isActive: activeKpi === 'khop' },
-      { label: 'Core ngày T – Swift ngày T-1',                   val: lech.length,    color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', onClick: () => toggleKpi('lech'),     isActive: activeKpi === 'lech' },
-      { label: 'Timeout – Core ghi nhận',                        val: timeout.length, color: '#d97706', bg: '#fffbeb', border: '#fde68a', onClick: () => toggleKpi('timeout'),  isActive: activeKpi === 'timeout' },
-      { label: 'Thất bại – trace không phát sinh bên NAPAS',     val: thatBai.length, color: '#dc2626', bg: '#fef2f2', border: '#fecaca', onClick: () => toggleKpi('that_bai'), isActive: activeKpi === 'that_bai' },
-    ]
-  } else {
-    const khop  = base.filter(r => r.recon_status === 'KHOP')
-    const lech  = base.filter(r => r.recon_status === 'KHOP_LECH_NGAY')
-    const chiSw = rows.filter(r => r.direction === dir && r.recon_status === 'CHI_SWIFT')
-    kpiItems = [
-      { label: 'Tổng Ghi nợ',         val: base.length,  color: opt.color, bg: opt.bg,    border: opt.border },
-      { label: 'Core ngày T – NAPAS ngày T',   val: khop.length,  color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', onClick: () => toggleKpi('khop'),      isActive: activeKpi === 'khop' },
-      { label: 'Core ngày T – NAPAS ngày T-1', val: lech.length,  color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', onClick: () => toggleKpi('lech'),      isActive: activeKpi === 'lech' },
-      { label: 'Chỉ Swift',                    val: chiSw.length, color: '#dc2626', bg: '#fef2f2', border: '#fecaca', onClick: () => toggleKpi('chi_swift'), isActive: activeKpi === 'chi_swift' },
-    ]
-  }
+  const kpiItems = [
+    { label: `Tổng ${entry}`, val: dateBase.length, color: opt.color, bg: opt.bg, border: opt.border },
+    ...activeCols.map((col, i) => ({
+      label: col.label, val: dateBase.filter(col.filterFn).length,
+      color: col.color, bg: col.bg, border: col.border,
+      onClick: () => toggleKpi(`col${i}`), isActive: activeKpi === `col${i}`,
+    })),
+  ]
 
   const th = (extra = {}) => ({
     padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700,
@@ -146,6 +125,17 @@ export default function CoreSummary() {
     textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap', ...extra,
   })
   const COLS = 12
+
+  const handleExport = async () => {
+    const STATUS = { THANH_CONG: 'Thành công', TIMEOUT: 'Timeout', THAT_BAI: 'Thất bại' }
+    const headers = ['Ngày', 'Trace', 'Sequence', 'Ngày Core', 'Loại ghi', 'Số tiền (VNĐ)', 'Ngày Swift', 'TT Swift', 'Ngày NAPAS', 'Giờ NAPAS', 'Loại NAPAS', 'TC/KTC', 'Kết quả khớp']
+    const rows = filtered.map(r => {
+      const col = activeCols.find(c => c.filterFn(r))
+      return [r.day, r.trace, r.sequence ?? '', r.core?.date ?? '', r.core?.entry ?? '', r.amount, r.swift?.date ?? '', STATUS[r.swift?.status] ?? '', r.napas?.date ?? '', r.napas?.time ?? '', r.napas?.type ?? '', r.napas ? (r.napas.failed ? 'KTC' : 'TC') : '', col?.label ?? r.recon_status]
+    })
+    const date = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')
+    await downloadDetailXlsx({ title: 'ĐỐI CHIẾU CORE GL – TỔNG HỢP', dir, filterFrom, filterTo, headers, rows, headerBg: opt.color, filename: `Core_GL_${entry.replace(' ', '_')}_${date}` })
+  }
 
   if (loading) return <PageShell title="Đối chiếu Core GL – Tổng hợp"><div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Đang tải dữ liệu...</div></PageShell>
 
@@ -187,9 +177,8 @@ export default function CoreSummary() {
       {/* View tab switcher */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
         {[
-          { key: 'all',          label: 'Tất cả',     count: base.length,           color: C.primary,  badgeBg: '#eff6ff' },
-          { key: 'unmatched',    label: 'Không khớp', count: unmatchedBase.length,  color: '#dc2626',  badgeBg: '#fef2f2' },
-          { key: 'needs_action', label: 'Cần xử lý',  count: needsActBase.length,   color: '#d97706',  badgeBg: '#fffbeb' },
+          { key: 'all',       label: 'Tất cả',     count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
+          { key: 'unmatched', label: 'Không khớp', count: unmatchedBase.length, color: '#dc2626', badgeBg: '#fef2f2' },
         ].map(t => {
           const active = activeView === t.key
           return (
@@ -226,27 +215,15 @@ export default function CoreSummary() {
           </div>
         </div>
       )}
-      {activeView === 'needs_action' && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#d97706', fontWeight: 700 }}>!</span>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>
-              {needsActBase.length} giao dịch cần xử lý thủ công
-            </div>
-            <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
-              Gồm timeout có Core, không khớp và ngoại lệ chưa được xác nhận. Cần review và ghi chú giải quyết.
-            </div>
-          </div>
-        </div>
-      )}
 
       <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
         <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: `1px solid ${C.cardBorder}`, flexWrap: 'wrap', background: C.neutralBg }}>
           <Input placeholder="Tìm trace, sequence..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
-          <Select value={filterDay} onChange={e => setFD(e.target.value)} style={{ width: 130 }}>
-            <option value="">Tất cả ngày</option>
-            {days.map(d => <option key={d} value={d}>{d}</option>)}
-          </Select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Input type="date" value={filterFrom} onChange={e => setFrom(e.target.value)} style={{ width: 150 }} />
+            <span style={{ fontSize: 12, color: C.textMuted, flexShrink: 0 }}>–</span>
+            <Input type="date" value={filterTo} onChange={e => setTo(e.target.value)} style={{ width: 150 }} />
+          </div>
           <Select value={filterCol} onChange={e => setFS(e.target.value)} style={{ width: 280 }}>
             <option value="">Tất cả GD</option>
             <option value="NEEDS_ACTION">Cần xử lý</option>
@@ -254,6 +231,7 @@ export default function CoreSummary() {
               <option key={i} value={i}>{col.label}</option>
             ))}
           </Select>
+          <Button size="sm" variant="subtle" onClick={handleExport}>↓ Xuất Excel</Button>
         </div>
 
         <div style={{ overflowX: 'auto' }}>

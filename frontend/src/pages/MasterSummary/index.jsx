@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import PageShell from '../../components/PageShell'
 import Button from '../../components/Button'
-import { Select } from '../../components/Input'
+import { Input } from '../../components/Input'
 import Pagination from '../../components/Pagination'
 import { C, radius, shadow } from '../../theme'
-import { RESOLUTION_OF, isT1, SWIFT_COLS, CORE_COLS_DI, CORE_COLS_DEN, NAPAS_COLS_DI, NAPAS_COLS_DEN } from '../../data/reconcile'
+import { isT1, SWIFT_COLS_DI, SWIFT_COLS_DEN, CORE_COLS_DI, CORE_COLS_DEN, NAPAS_COLS_DI, NAPAS_COLS_DEN } from '../../data/reconcile'
 import { DirectionToggle, SwiftStatusCell, NapasTypeTag, NapasStatusCell, StatusBadge, Dash, LastSyncBanner } from '../../components/ReconShared'
 import { api } from '../../api/client'
+import { useApp } from '../../context/AppContext'
+import { downloadMasterXlsx } from '../../utils/export'
 
 /* Tính ngày lệch n ngày từ chuỗi dd/mm/yyyy */
 function dayOffset(ddmmyyyy, n) {
@@ -26,8 +28,8 @@ function ColBadge({ row, cols }) {
 }
 
 const getSections = dir => [
-  { id: 'swift', label: 'Swift – Core GL',   color:'#1e40af', bg:'#eff6ff', border:'#bfdbfe', totalFn: r => !!r.swift, cols: SWIFT_COLS },
-  { id: 'core',  label: 'Core GL tổng hợp', color:'#166534', bg:'#dcfce7', border:'#bbf7d0', totalFn: r => !!r.core,  cols: dir==='Đi' ? CORE_COLS_DI : CORE_COLS_DEN },
+  { id: 'swift', label: 'Swift – Core GL',   color:'#1e40af', bg:'#eff6ff', border:'#bfdbfe', totalFn: r => !!r.swift, cols: dir==='Đi' ? SWIFT_COLS_DI : SWIFT_COLS_DEN },
+  { id: 'core',  label: 'Core GL tổng hợp', color:'#166534', bg:'#dcfce7', border:'#bbf7d0', totalFn: r => !!r.core,  cols: dir==='Đi' ? CORE_COLS_DI  : CORE_COLS_DEN  },
   { id: 'napas', label: 'NAPAS – Core GL',   color:'#854d0e', bg:'#fefce8', border:'#fde68a', totalFn: r => !!r.napas, cols: dir==='Đi' ? NAPAS_COLS_DI : NAPAS_COLS_DEN },
 ]
 
@@ -243,42 +245,47 @@ function DetailAll({ rows }) {
   )
 }
 
-/* ── Count cell ───────────────────────────────────────────────────────────── */
-function CountCell({ count, col, isActive, onClick }) {
-  const style = {
-    padding: '9px 6px', textAlign: 'center',
-    borderBottom: '1px solid #f3f4f6', borderRight: '1px solid #f3f4f6',
-    background: isActive ? col.bg : 'transparent',
-  }
-  if (!count) return <td style={style}><span style={{ color:'#d1d5db', fontSize:12 }}>—</span></td>
+/* ── Count pair: 2 <td> – count button + full amount ─────────────────────── */
+function CountPair({ count, amt, col, isActive, onClick, borderRight = '1px solid #f3f4f6', expanded }) {
+  const base = { borderBottom: expanded ? 'none' : '1px solid #f3f4f6', verticalAlign: 'middle' }
+  if (!count) return (
+    <>
+      <td style={{ ...base, padding:'7px 6px', textAlign:'center', borderRight }}>
+        <span style={{ color:'#d1d5db', fontSize:12 }}>—</span>
+      </td>
+      <td style={{ ...base, padding:'7px 8px', textAlign:'right', borderRight }} />
+    </>
+  )
   return (
-    <td style={style}>
-      <button onClick={onClick} title={col.label}
-        style={{
-          display:'inline-block', minWidth:26, padding:'2px 7px', borderRadius:99,
-          fontSize:12, fontWeight:700, cursor:'pointer',
-          border: isActive ? `1.5px solid ${col.border}` : 'none',
-          background: col.bg, color: col.color,
-        }}>
-        {count}
-      </button>
-    </td>
+    <>
+      <td style={{ ...base, padding:'7px 6px', textAlign:'center', background: isActive ? col.bg : 'transparent', borderRight }}>
+        <button onClick={onClick} title={col.label}
+          style={{
+            padding:'3px 7px', borderRadius:6,
+            fontSize:12, fontWeight:700, cursor:'pointer',
+            border: isActive ? `1.5px solid ${col.border}` : `1px solid ${col.border}66`,
+            background: col.bg, color: col.color,
+          }}>
+          {count}
+        </button>
+      </td>
+      <td style={{ ...base, padding:'7px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:col.color, background: isActive ? col.bg : 'transparent', borderRight }}>
+        {amt > 0 ? amt.toLocaleString('vi-VN') : ''}
+      </td>
+    </>
   )
 }
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 export default function MasterSummary() {
+  const { filterFrom, setFilterFrom: setFrom, filterTo, setFilterTo: setTo } = useApp()
   const [dir, setDir]               = useState('Đi')
-  const [activeView, setView]       = useState('summary')
   const [visibleSections, setVS]    = useState(new Set(['swift', 'core', 'napas']))
   const [expandKey, setExpandKey]   = useState(null)
   const [allData, setAllData]       = useState([])
   const [loading, setLoading]       = useState(true)
   const [detailPage, setDP]         = useState(1)
   const [detailPageSize, setDPS]    = useState(30)
-  const [unmatchedPage, setUP]      = useState(1)
-  const [unmatchedPageSize, setUPS] = useState(30)
-  const [filterDay, setFD]          = useState('')
   const topScrollRef                = useRef(null)
   const tableScrollRef              = useRef(null)
 
@@ -319,12 +326,10 @@ export default function MasterSummary() {
   })
   const toggleExpand = key => setExpandKey(prev => prev === key ? null : key)
 
-  const SECTIONS      = getSections(dir)
-  const allRows       = allData.filter(r => r.direction === dir)
-  const visSections   = SECTIONS.filter(s => visibleSections.has(s.id))
-  const totalCols     = 1 + visSections.reduce((n, s) => n + 1 + s.cols.length, 0) + 1
-  const unmatchedRows = allRows.filter(r => !['KHOP', 'KHOP_LECH_NGAY'].includes(r.recon_status))
-  const needsActRows  = allRows.filter(r => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by)
+  const SECTIONS    = getSections(dir)
+  const allRows     = allData.filter(r => r.direction === dir)
+  const visSections = SECTIONS.filter(s => visibleSections.has(s.id))
+  const totalCols   = 1 + visSections.reduce((n, s) => n + 2 + 2 * s.cols.length, 0) + 1
 
   const th = (ex = {}) => ({
     padding: '7px 6px', fontSize: 10, fontWeight: 700, color: C.textMuted,
@@ -342,9 +347,19 @@ export default function MasterSummary() {
     return days.sort()
   }, [allData])
 
-  const filteredDays   = filterDay ? DAYS.filter(d => d === filterDay) : DAYS
-  const pagedUnmatched = unmatchedRows.slice((unmatchedPage - 1) * unmatchedPageSize, unmatchedPage * unmatchedPageSize)
-  const pagedNeedsAct  = needsActRows.slice((unmatchedPage - 1) * unmatchedPageSize, unmatchedPage * unmatchedPageSize)
+  const dayToISO = s => { const [d, m, y] = s.split('/'); return `${y}-${m}-${d}` }
+  const filteredDays = DAYS.filter(d => {
+    const iso = dayToISO(d)
+    if (filterFrom && iso < filterFrom) return false
+    if (filterTo   && iso > filterTo)   return false
+    return true
+  })
+  const filteredDaySet = new Set(filteredDays)
+  const filteredRows   = allRows.filter(r => filteredDaySet.has(r.day))
+
+  const handleExport = async () => {
+    await downloadMasterXlsx({ dir, visSections, filteredDays, allRows, filteredRows, sumAmt, filterFrom, filterTo })
+  }
 
   if (loading) return <PageShell title="Tổng hợp 3 nguồn"><div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Đang tải dữ liệu...</div></PageShell>
 
@@ -355,135 +370,87 @@ export default function MasterSummary() {
     >
       <LastSyncBanner />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <DirectionToggle value={dir} onChange={d => { setDir(d); setExpandKey(null); setFD(''); setView('summary'); setUP(1) }} />
-        {activeView === 'summary' && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {SECTIONS.map(s => {
-              const active = visibleSections.has(s.id)
-              return (
-                <button key={s.id} onClick={() => toggleSection(s.id)}
-                  style={{
-                    padding: '5px 14px', borderRadius: 6, fontFamily: 'inherit',
-                    border: `1.5px solid ${active ? s.border : C.cardBorder}`,
-                    background: active ? s.bg : '#fff', color: active ? s.color : C.textMuted,
-                    fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.12s',
-                  }}>
-                  {s.label}
-                </button>
-              )
-            })}
-          </div>
-        )}
-        {activeView === 'summary' && (
-          <Select value={filterDay} onChange={e => { setFD(e.target.value); setExpandKey(null) }} style={{ width: 140 }}>
-            <option value="">Tất cả ngày</option>
-            {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-          </Select>
-        )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <DirectionToggle value={dir} onChange={d => { setDir(d); setExpandKey(null); setFrom(''); setTo('') }} />
+        <div style={{ display: 'flex', gap: 6 }}>
+          {SECTIONS.map(s => {
+            const active = visibleSections.has(s.id)
+            return (
+              <button key={s.id} onClick={() => toggleSection(s.id)}
+                style={{
+                  padding: '5px 14px', borderRadius: 6, fontFamily: 'inherit',
+                  border: `1.5px solid ${active ? s.border : C.cardBorder}`,
+                  background: active ? s.bg : '#fff', color: active ? s.color : C.textMuted,
+                  fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.12s',
+                }}>
+                {s.label}
+              </button>
+            )
+          })}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Input type="date" value={filterFrom} onChange={e => { setFrom(e.target.value); setExpandKey(null) }} style={{ width: 150 }} />
+          <span style={{ fontSize: 12, color: C.textMuted, flexShrink: 0 }}>–</span>
+          <Input type="date" value={filterTo} onChange={e => { setTo(e.target.value); setExpandKey(null) }} style={{ width: 150 }} />
+        </div>
+        <Button size="sm" variant="subtle" onClick={handleExport}>↓ Xuất Excel</Button>
       </div>
 
-      {/* View tab switcher */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
-        {[
-          { key: 'summary',      label: 'Tổng hợp',   count: allRows.length,        color: C.primary,  badgeBg: '#eff6ff' },
-          { key: 'unmatched',    label: 'Không khớp', count: unmatchedRows.length,  color: '#dc2626',  badgeBg: '#fef2f2' },
-          { key: 'needs_action', label: 'Cần xử lý',  count: needsActRows.length,   color: '#d97706',  badgeBg: '#fffbeb' },
-        ].map(t => {
-          const active = activeView === t.key
-          return (
-            <button key={t.key} onClick={() => { setView(t.key); setUP(1) }}
-              style={{ padding: '9px 18px', border: 'none', background: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: active ? 700 : 500,
-                color: active ? t.color : C.textMuted,
-                borderBottom: active ? `2.5px solid ${t.color}` : '2.5px solid transparent',
-                marginBottom: -1, transition: 'all 0.12s' }}>
-              {t.label}
-              {t.count > 0 && (
-                <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 99, fontSize: 11,
-                  fontWeight: 700, background: active ? t.color : t.badgeBg,
-                  color: active ? '#fff' : t.color }}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Không khớp flat view */}
-      {activeView === 'unmatched' && (
-        <div style={{ background: '#fff', border: `1px solid #fecaca`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 16px', background: '#fef2f2', borderBottom: '1px solid #fecaca', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, color: '#dc2626', fontWeight: 700, flexShrink: 0 }}>!</span>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>
-                {unmatchedRows.length} giao dịch không khớp hoàn toàn — chưa cân bằng giữa 3 nguồn ({dir})
-              </div>
-              <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-                Gồm các trạng thái Chỉ Swift, Chỉ NAPAS, Chỉ Core, Timeout, Thất bại và Ngoại lệ. Kiểm tra từng dòng với bộ phận liên quan.
-              </div>
-            </div>
-          </div>
-          <DetailAll rows={pagedUnmatched} />
-          <Pagination total={unmatchedRows.length} page={unmatchedPage} pageSize={unmatchedPageSize} onPage={setUP} onPageSize={setUPS} />
-        </div>
-      )}
-
-      {/* Cần xử lý flat view */}
-      {activeView === 'needs_action' && (
-        <div style={{ background: '#fff', border: `1px solid #fde68a`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 16px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, color: '#d97706', fontWeight: 700, flexShrink: 0 }}>!</span>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>
-                {needsActRows.length} giao dịch cần xử lý thủ công ({dir})
-              </div>
-              <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
-                Operator hoặc Admin cần review, xác nhận hủy hoặc liên hệ đối tác tùy từng trường hợp.
-              </div>
-            </div>
-          </div>
-          <DetailAll rows={pagedNeedsAct} />
-          <Pagination total={needsActRows.length} page={unmatchedPage} pageSize={unmatchedPageSize} onPage={setUP} onPageSize={setUPS} />
-        </div>
-      )}
-
-      {activeView === 'summary' && <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
+      <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
         <div ref={topScrollRef} style={{ overflowX: 'auto', overflowY: 'hidden', height: 12, borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg }}>
           <div style={{ height: 1 }} />
         </div>
         <div ref={tableScrollRef} style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
+              {/* Row 1: Ngày GD + section group headers */}
               <tr>
-                <th style={{ ...th({ textAlign:'left', padding:'8px 12px', minWidth:110 }), borderRight:`2px solid ${C.cardBorder}` }} rowSpan={2}>
+                <th style={{ ...th({ textAlign:'left', padding:'8px 12px', minWidth:110 }), borderRight:`2px solid ${C.cardBorder}` }} rowSpan={3}>
                   Ngày GD
                 </th>
                 {visSections.map(s => (
-                  <th key={s.id} colSpan={1 + s.cols.length}
+                  <th key={s.id} colSpan={2 + 2 * s.cols.length}
                     style={{ padding:'6px 8px', textAlign:'center', fontSize:11, fontWeight:800,
                       letterSpacing:0.5, background:s.bg, color:s.color,
                       borderBottom:`1px solid ${s.border}`, borderRight:`2px solid ${s.border}` }}>
                     {s.label}
                   </th>
                 ))}
-                <th style={th()} rowSpan={2} />
+                <th style={th()} rowSpan={3} />
               </tr>
+              {/* Row 2: Tổng + col group labels */}
               <tr>
                 {visSections.map(s => (
                   <>
-                    <th key={s.id+'_t'} style={th({ background:s.bg, color:s.color, minWidth:52, fontWeight:800, borderRight:`1px solid ${s.border}` })}>
+                    <th key={s.id+'_t'} colSpan={2} style={th({ background:s.bg, color:s.color, fontWeight:800, borderRight:`1px solid ${s.border}` })}>
                       Tổng
                     </th>
                     {s.cols.map((col, ci) => (
-                      <th key={s.id+ci} style={th({
-                        background:s.bg, color:s.color, minWidth:110, fontWeight:600,
+                      <th key={s.id+ci} colSpan={2} style={th({
+                        background: col.bg, color: col.color, fontWeight:600,
                         borderRight: ci===s.cols.length-1 ? `2px solid ${s.border}` : '1px solid #f3f4f6',
                         lineHeight: 1.4,
                       })}>
                         {col.label}
                       </th>
+                    ))}
+                  </>
+                ))}
+              </tr>
+              {/* Row 3: Số GD / Số tiền leaf columns */}
+              <tr>
+                {visSections.map(s => (
+                  <>
+                    <th key={s.id+'_tgd'} style={th({ background:s.bg, color:s.color, minWidth:44, fontSize:9 })}>Số GD</th>
+                    <th key={s.id+'_tamt'} style={th({ background:s.bg, color:s.color, minWidth:120, fontSize:9, borderRight:`1px solid ${s.border}` })}>Số tiền (VNĐ)</th>
+                    {s.cols.map((col, ci) => (
+                      <>
+                        <th key={s.id+ci+'_gd'} style={th({ background:col.bg, color:col.color, minWidth:44, fontSize:9 })}>Số GD</th>
+                        <th key={s.id+ci+'_amt'} style={th({
+                          background:col.bg, color:col.color, minWidth:120, fontSize:9,
+                          borderRight: ci===s.cols.length-1 ? `2px solid ${s.border}` : '1px solid #f3f4f6',
+                        })}>Số tiền (VNĐ)</th>
+                      </>
                     ))}
                   </>
                 ))}
@@ -495,7 +462,6 @@ export default function MasterSummary() {
                 const expanded     = expandKey?.startsWith(day + ':')
                 const expandSuffix = expanded ? expandKey.slice(day.length + 1) : null
 
-                /* Parse which section & col were clicked to pick detail view */
                 let detailRows  = dayRows
                 let detailLabel = ''
                 let detailColor = {}
@@ -503,9 +469,9 @@ export default function MasterSummary() {
                 if (expandSuffix && expandSuffix !== 'all') {
                   const parts  = expandSuffix.split(':')
                   const secId  = parts[0]
-                  const colKey = parts[2]   // 'total' or numeric index
+                  const colKey = parts[2]
                   const sec    = SECTIONS.find(s => s.id === secId)
-                  detailMode   = secId       // 'swift' | 'core' | 'napas'
+                  detailMode   = secId
                   if (colKey === 'total') {
                     detailRows  = dayRows.filter(sec.totalFn)
                     detailLabel = `Tổng ${sec.label}`
@@ -533,13 +499,15 @@ export default function MasterSummary() {
                       </td>
 
                       {visSections.map(s => {
-                        const secTotal  = dayRows.filter(s.totalFn).length
+                        const secRows   = dayRows.filter(s.totalFn)
+                        const secTotal  = secRows.length
+                        const secAmt    = sumAmt(secRows)
                         const totalKey  = `${day}:${s.id}::total`
                         const totActive = expandKey === totalKey
                         return (
                           <>
-                            <td key={s.id+'_tot'} style={{
-                              padding:'9px 10px', textAlign:'center', fontWeight:700, fontSize:13,
+                            <td key={s.id+'_cnt'} style={{
+                              padding:'7px 6px', textAlign:'center', fontWeight:700, fontSize:13,
                               borderBottom: expanded ? 'none' : `1px solid ${C.cardBorder}`,
                               borderRight:`1px solid ${s.border}`,
                               background: totActive ? s.bg : 'transparent',
@@ -549,14 +517,28 @@ export default function MasterSummary() {
                               onClick={() => secTotal && toggleExpand(totalKey)}>
                               {secTotal || '—'}
                             </td>
+                            <td key={s.id+'_tamt'} style={{
+                              padding:'7px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11,
+                              borderBottom: expanded ? 'none' : `1px solid ${C.cardBorder}`,
+                              borderRight:`1px solid ${s.border}`,
+                              background: totActive ? s.bg : 'transparent',
+                              color: secTotal ? s.color : '#d1d5db',
+                            }}>
+                              {secAmt > 0 ? secAmt.toLocaleString('vi-VN') : ''}
+                            </td>
                             {s.cols.map((col, ci) => {
+                              const colRows  = dayRows.filter(col.filterFn)
                               const cellKey  = `${day}:${s.id}::${ci}`
                               const isActive = expandKey === cellKey
+                              const br = ci === s.cols.length - 1 ? `2px solid ${s.border}` : '1px solid #f3f4f6'
                               return (
-                                <CountCell key={cellKey}
-                                  count={dayRows.filter(col.filterFn).length}
+                                <CountPair key={cellKey}
+                                  count={colRows.length}
+                                  amt={sumAmt(colRows)}
                                   col={col} isActive={isActive}
-                                  onClick={() => toggleExpand(cellKey)} />
+                                  onClick={() => toggleExpand(cellKey)}
+                                  borderRight={br}
+                                  expanded={expanded} />
                               )
                             })}
                           </>
@@ -592,7 +574,7 @@ export default function MasterSummary() {
                                 ✕
                               </button>
                             </div>
-                            {detailMode === 'swift' && <DetailSwift rows={pagedDetail} cols={SWIFT_COLS} />}
+                            {detailMode === 'swift' && <DetailSwift rows={pagedDetail} cols={dir==='Đi' ? SWIFT_COLS_DI : SWIFT_COLS_DEN} />}
                             {detailMode === 'napas' && <DetailNapas rows={pagedDetail} cols={dir==='Đi' ? NAPAS_COLS_DI : NAPAS_COLS_DEN} />}
                             {detailMode === 'core'  && <DetailCore  rows={pagedDetail} cols={dir==='Đi' ? CORE_COLS_DI  : CORE_COLS_DEN}  />}
                             {detailMode === 'all'   && <DetailAll   rows={pagedDetail} />}
@@ -610,38 +592,63 @@ export default function MasterSummary() {
                 <td style={{ padding:'10px 12px', fontSize:12, fontWeight:700, color:'#374151',
                   borderTop:`2px solid ${C.cardBorder}`, borderRight:`2px solid ${C.cardBorder}` }}>
                   Tổng cộng
-                  <div style={{ fontSize:11, fontWeight:400, color:C.textMuted }}>{fmtAmt(sumAmt(allRows))}</div>
+                  <div style={{ fontSize:11, fontWeight:400, color:C.textMuted }}>{fmtAmt(sumAmt(filteredRows))}</div>
                 </td>
-                {visSections.map(s => (
-                  <>
-                    <td key={s.id+'_gtot'} style={{
-                      padding:'10px 10px', textAlign:'center', fontSize:13, fontWeight:700,
-                      borderTop:`2px solid ${C.cardBorder}`, borderRight:`1px solid ${s.border}`,
-                      color:s.color, background:s.bg,
-                    }}>
-                      {allRows.filter(s.totalFn).length}
-                    </td>
-                    {s.cols.map((col, ci) => {
-                      const count = allRows.filter(col.filterFn).length
-                      return (
-                        <td key={s.id+ci+'_g'} style={{
-                          padding:'10px 8px', textAlign:'center', fontSize:12, fontWeight:700,
-                          borderTop:`2px solid ${C.cardBorder}`,
-                          borderRight: ci===s.cols.length-1 ? `2px solid ${s.border}` : '1px solid #f3f4f6',
-                          color: count ? col.color : '#d1d5db',
-                        }}>
-                          {count || '—'}
-                        </td>
-                      )
-                    })}
-                  </>
-                ))}
+                {visSections.map(s => {
+                  const gSecRows = filteredRows.filter(s.totalFn)
+                  const gSecAmt  = sumAmt(gSecRows)
+                  return (
+                    <>
+                      <td key={s.id+'_gcnt'} style={{
+                        padding:'8px 6px', textAlign:'center', fontSize:13, fontWeight:700,
+                        borderTop:`2px solid ${C.cardBorder}`, borderRight:`1px solid ${s.border}`,
+                        color: s.color, background: s.bg,
+                      }}>
+                        {gSecRows.length || '—'}
+                      </td>
+                      <td key={s.id+'_gamt'} style={{
+                        padding:'8px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11,
+                        borderTop:`2px solid ${C.cardBorder}`, borderRight:`1px solid ${s.border}`,
+                        color: s.color, background: s.bg,
+                      }}>
+                        {gSecAmt > 0 ? gSecAmt.toLocaleString('vi-VN') : ''}
+                      </td>
+                      {s.cols.map((col, ci) => {
+                        const gColRows = filteredRows.filter(col.filterFn)
+                        const count    = gColRows.length
+                        const gColAmt  = sumAmt(gColRows)
+                        return (
+                          <>
+                            <td key={s.id+ci+'_gcnt'} style={{
+                              padding:'8px 6px', textAlign:'center', fontSize:12, fontWeight:700,
+                              borderTop:`2px solid ${C.cardBorder}`,
+                              borderRight: ci===s.cols.length-1 ? `2px solid ${s.border}` : '1px solid #f3f4f6',
+                              color: count ? col.color : '#d1d5db',
+                              background: count ? col.bg : 'transparent',
+                            }}>
+                              {count || '—'}
+                            </td>
+                            <td key={s.id+ci+'_gamt'} style={{
+                              padding:'8px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11,
+                              borderTop:`2px solid ${C.cardBorder}`,
+                              borderRight: ci===s.cols.length-1 ? `2px solid ${s.border}` : '1px solid #f3f4f6',
+                              color: count ? col.color : '#d1d5db',
+                              background: count ? col.bg : 'transparent',
+                            }}>
+                              {gColAmt > 0 ? gColAmt.toLocaleString('vi-VN') : ''}
+                            </td>
+                          </>
+                        )
+                      })}
+                    </>
+                  )
+                })}
                 <td style={{ borderTop:`2px solid ${C.cardBorder}` }} />
               </tr>
             </tbody>
           </table>
         </div>
-      </div>}
+      </div>
     </PageShell>
   )
 }

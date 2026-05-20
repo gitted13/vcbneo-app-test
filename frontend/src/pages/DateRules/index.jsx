@@ -1,246 +1,423 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
-import Button from '../../components/Button'
-import Modal from '../../components/Modal'
-import { Input, Select, FormRow } from '../../components/Input'
-import { useApp } from '../../context/AppContext'
-import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
-import { RECON_STATUS_META } from '../../data/reconcile'
+import { SWIFT_COLS_DI, SWIFT_COLS_DEN, NAPAS_COLS_DI, NAPAS_COLS_DEN, CORE_COLS_DI, CORE_COLS_DEN } from '../../data/reconcile'
 
-const CLASSIFICATION_OPTIONS = [
-  { value: 'KHOP',           label: 'Khớp đủ – tự động khớp' },
-  { value: 'KHOP_LECH_NGAY', label: 'Khớp lệch ngày – chấp nhận tự động' },
-  { value: 'TIMEOUT_CO_CORE',label: 'Timeout – Core ghi nhận (cần review)' },
-  { value: 'CHI_SWIFT',      label: 'Chỉ Swift – kiểm tra thủ công' },
-  { value: 'SWIFT_TIMEOUT',  label: 'Swift timeout – xác nhận hủy' },
-  { value: 'SWIFT_THAT_BAI', label: 'Swift thất bại – xác nhận hủy' },
-  { value: 'NAPAS_THAT_BAI', label: 'NAPAS thất bại – liên hệ đối tác' },
-  { value: 'CHI_NAPAS',      label: 'Chỉ NAPAS – kiểm tra thủ công' },
-  { value: 'CHI_CORE',       label: 'Chỉ Core – kiểm tra thủ công' },
-  { value: 'NGOAI_LE',       label: 'Ngoại lệ – cần điều tra' },
+const F = (f, op, v) => ({ f, op, v })
+
+const DEFAULT_CONDS = {
+  SWIFT_DI: [
+    [F('TT Swift','=','Thành công'), F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thành công'), F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Timeout'),    F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Timeout'),    F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thất bại'),   F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thất bại'),   F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+    [F('Swift','≠','null'),          F('Core','=','null')],
+  ],
+  SWIFT_DEN: [
+    [F('TT Swift','=','Thành công'), F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thành công'), F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Timeout'),    F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Timeout'),    F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thất bại'),   F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
+    [F('TT Swift','=','Thất bại'),   F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
+  ],
+  NAPAS_DI: [
+    [F('TC/KTC','=','TC'), F('Ngày NAPAS','<','Ngày Core'), F('Core','≠','null')],
+    [F('TC/KTC','=','TC'), F('Ngày NAPAS','=','Ngày Core'), F('Core','≠','null')],
+    [F('TC/KTC','=','KTC')],
+    [F('TC/KTC','=','TC'), F('Core','=','null')],
+  ],
+  NAPAS_DEN: [
+    [F('TC/KTC','=','TC'), F('Ngày Core','<','Ngày NAPAS'), F('Core','≠','null')],
+    [F('TC/KTC','=','TC'), F('Ngày Core','=','Ngày NAPAS'), F('Core','≠','null')],
+    [F('TC/KTC','=','TC'), F('Ngày Core','>','Ngày NAPAS'), F('Core','≠','null')],
+  ],
+  CORE_DI: [
+    [F('Ngày Swift','<','Ngày Core'), F('Ngày NAPAS','=','Ngày Core'), F('Swift & NAPAS','≠','null')],
+    [F('Ngày Swift','=','Ngày Core'), F('Ngày NAPAS','=','Ngày Core'), F('Swift & NAPAS','≠','null')],
+    [F('Ngày Swift','=','Ngày Core'), F('Ngày NAPAS','>','Ngày Core'), F('Swift & NAPAS','≠','null')],
+    [F('TT Swift','=','Thất bại'),    F('NAPAS','=','null'),           F('Core','≠','null')],
+  ],
+  CORE_DEN: [
+    [F('Ngày NAPAS','<','Ngày Core'), F('NAPAS','≠','null')],
+    [F('Ngày NAPAS','=','Ngày Core'), F('NAPAS','≠','null')],
+    [F('Ngày NAPAS','>','Ngày Core'), F('NAPAS','≠','null')],
+    [F('Core','≠','null'),            F('NAPAS','=','null')],
+  ],
+}
+
+const OP_COLOR = {
+  '=':  { color: '#166534', bg: '#dcfce7', border: '#86efac' },
+  '≠':  { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+  '<':  { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
+  '>':  { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
+}
+
+const FIELD_OPTIONS = [
+  'TT Swift', 'Ngày GD', 'Ngày GN', 'Swift',
+  'TC/KTC', 'Ngày NAPAS', 'NAPAS',
+  'Ngày Core', 'Core', 'Ngày Swift', 'Swift & NAPAS',
 ]
 
-const CONDITION_OPTIONS = [
-  { value: 'khop_du_3_nguon',       label: 'Khớp đủ 3 nguồn – trace, số tiền, ngày trùng nhau' },
-  { value: 'lech_1_ngay',           label: 'Ngày lệch đúng 1 ngày (T±1)' },
-  { value: 'lech_2_ngay',           label: 'Ngày lệch đúng 2 ngày (T±2)' },
-  { value: 'swift_timeout_core_ok', label: 'Swift TIMEOUT nhưng Core + NAPAS ghi nhận' },
-  { value: 'chi_swift_thanh_cong',  label: 'Swift THANH CONG – không có NAPAS / Core' },
-  { value: 'swift_timeout_only',    label: 'Swift TIMEOUT – không có NAPAS / Core' },
-  { value: 'swift_that_bai',        label: 'Swift THAT BAI – không có NAPAS / Core' },
-  { value: 'napas_that_bai',        label: 'NAPAS báo thất bại (file lỗi đi)' },
-  { value: 'chi_napas',             label: 'Chỉ có trên NAPAS – không có Swift / Core' },
-  { value: 'chi_core',              label: 'Chỉ có trên Core – không có Swift / NAPAS' },
-  { value: 'lech_qua_nguong',       label: 'Ngày lệch vượt ngưỡng (> 2 ngày)' },
-]
+const VALUE_SUGGESTIONS = {
+  'TT Swift':      ['Thành công', 'Timeout', 'Thất bại'],
+  'Ngày GD':       ['Ngày GN'],
+  'Ngày GN':       ['Ngày GD'],
+  'TC/KTC':        ['TC', 'KTC'],
+  'Ngày NAPAS':    ['Ngày Core'],
+  'Ngày Swift':    ['Ngày Core'],
+  'Ngày Core':     ['Ngày NAPAS', 'Ngày Swift'],
+  'Core':          ['null'],
+  'Swift':         ['null'],
+  'NAPAS':         ['null'],
+  'Swift & NAPAS': ['null'],
+}
 
-const CONDITION_LABELS = Object.fromEntries(CONDITION_OPTIONS.map(o => [o.value, o.label]))
+const LS_KEY = 'vcbneo_dateRulesConds_v2'
 
-const INITIAL_DATE_RULES = [
-  {
-    id: 'dr_000', name: 'Khớp đủ 3 nguồn',
-    description: 'Swift, NAPAS và Core đều có giao dịch với trace + số tiền + ngày trùng nhau. Đây là trường hợp lý tưởng – tự động đánh dấu khớp, không cần xử lý.',
-    condition: 'khop_du_3_nguon', classification: 'KHOP', action: 'auto', active: true,
-  },
-  {
-    id: 'dr_001', name: 'Lệch ngày T+1 (Core chốt sổ)',
-    description: 'Swift và NAPAS khớp trace/amount cùng ngày T, Core hạch toán vào ngày T+1 do chốt sổ cuối ngày. Tự động chấp nhận là khớp lệch ngày.',
-    condition: 'lech_1_ngay', classification: 'KHOP_LECH_NGAY', action: 'auto', active: true,
-  },
-  {
-    id: 'dr_002', name: 'Lệch ngày T-1 (NAPAS quyết toán)',
-    description: 'NAPAS ghi ngày quyết toán T-1 trong khi Swift và Core ghi ngày host T (cơ chế QT cuối ngày của NAPAS). Tự động chấp nhận là khớp lệch ngày.',
-    condition: 'lech_1_ngay', classification: 'KHOP_LECH_NGAY', action: 'auto', active: true,
-  },
-  {
-    id: 'dr_003', name: 'Lệch 2 ngày (qua cuối tuần / lễ)',
-    description: 'Ngày lệch 2 ngày – thường xảy ra khi giao dịch thực hiện trước ngày nghỉ. Operator cần xác nhận thủ công trước khi chấp nhận.',
-    condition: 'lech_2_ngay', classification: 'KHOP_LECH_NGAY', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_004', name: 'Swift Timeout – Core + NAPAS ghi nhận',
-    description: 'Swift báo timeout nhưng Core và NAPAS đều ghi nhận giao dịch thành công. Giao dịch thực sự đã thực hiện – Operator cần review và xác nhận.',
-    condition: 'swift_timeout_core_ok', classification: 'TIMEOUT_CO_CORE', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_005', name: 'Chỉ có Swift (THANH CONG)',
-    description: 'Swift ghi nhận giao dịch THANH CONG nhưng không tìm thấy trace tương ứng bên NAPAS hoặc Core. Cần kiểm tra thủ công nguyên nhân.',
-    condition: 'chi_swift_thanh_cong', classification: 'CHI_SWIFT', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_006', name: 'Swift Timeout – không có Core / NAPAS',
-    description: 'Swift báo timeout và cả Core lẫn NAPAS đều không ghi nhận giao dịch này. Giao dịch khả năng đã bị hủy – Operator xác nhận hủy.',
-    condition: 'swift_timeout_only', classification: 'SWIFT_TIMEOUT', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_007', name: 'Swift thất bại – trace không phát sinh bên NAPAS',
-    description: 'Swift báo THAT_BAI và không có trace tương ứng trên NAPAS hoặc Core. Giao dịch không thực hiện được – Operator xác nhận hủy.',
-    condition: 'swift_that_bai', classification: 'SWIFT_THAT_BAI', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_008', name: 'NAPAS thất bại (file lỗi đi)',
-    description: 'Giao dịch xuất hiện trong file lỗi NAPAS chiều đi (NAPAS báo không thực hiện được). Cần liên hệ NAPAS để tra cứu và đối chiếu.',
-    condition: 'napas_that_bai', classification: 'NAPAS_THAT_BAI', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_009', name: 'Chỉ có NAPAS',
-    description: 'NAPAS ghi nhận giao dịch nhưng không tìm thấy trace tương ứng bên Swift hoặc Core. Cần kiểm tra thủ công – có thể thiếu dữ liệu đầu vào.',
-    condition: 'chi_napas', classification: 'CHI_NAPAS', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_010', name: 'Chỉ có Core',
-    description: 'Core ghi nhận giao dịch nhưng không tìm thấy trace tương ứng bên Swift hoặc NAPAS. Cần kiểm tra thủ công – có thể là giao dịch nội bộ.',
-    condition: 'chi_core', classification: 'CHI_CORE', action: 'manual', active: true,
-  },
-  {
-    id: 'dr_011', name: 'Lệch ngày quá ngưỡng – ngoại lệ',
-    description: 'Chênh lệch ngày vượt quá 2 ngày và không khớp bất kỳ quy tắc nào. Không thể tự động phân loại – đánh dấu ngoại lệ để điều tra.',
-    condition: 'lech_qua_nguong', classification: 'NGOAI_LE', action: 'manual', active: true,
-  },
-]
+function loadConds() {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return DEFAULT_CONDS
+}
 
-export default function DateRules() {
-  const { showConfirm, toast } = useApp()
-  const { user } = useAuth()
-  const isAdmin    = user?.role === 'Admin'
-  const isOperator = user?.role === 'Operator'
+function persistConds(c) {
+  localStorage.setItem(LS_KEY, JSON.stringify(c))
+}
 
-  const [rules, setRules]       = useState(INITIAL_DATE_RULES)
-  const [formOpen, setFormOpen] = useState(false)
-  const [editing, setEditing]   = useState(null)
+/* ── Chip ─────────────────────────────────────────────────────────────────── */
+function Chip({ chip, onRemove }) {
+  const c = OP_COLOR[chip.op] ?? { color: '#374151', bg: '#f3f4f6', border: '#e5e7eb' }
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 2,
+      padding: onRemove ? '2px 4px 2px 7px' : '2px 7px',
+      borderRadius: 5, border: `1px solid ${c.border}`,
+      background: c.bg, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap',
+    }}>
+      <span style={{ color: C.textMuted, fontWeight: 400 }}>{chip.f}</span>
+      <span style={{ color: c.color, fontWeight: 700, margin: '0 2px' }}>{chip.op}</span>
+      <span style={{ color: c.color, fontWeight: 700 }}>{chip.v}</span>
+      {onRemove && (
+        <button onClick={onRemove} style={{
+          marginLeft: 2, background: 'none', border: 'none', cursor: 'pointer',
+          color: '#ef4444', fontSize: 14, fontWeight: 700, padding: '0 2px',
+          lineHeight: 1, display: 'flex', alignItems: 'center',
+        }}>×</button>
+      )}
+    </span>
+  )
+}
 
-  const openCreate = () => { setEditing(null); setFormOpen(true) }
-  const openEdit   = (rule) => { setEditing(rule); setFormOpen(true) }
+/* ── AddChipForm ──────────────────────────────────────────────────────────── */
+function AddChipForm({ onAdd }) {
+  const [f, setF] = useState(FIELD_OPTIONS[0])
+  const [op, setOp] = useState('=')
+  const [v, setV] = useState('')
 
-  const toggleActive = (rule) => {
-    setRules(prev => prev.map(r => r.id === rule.id ? { ...r, active: !r.active } : r))
-    toast(`Quy tắc "${rule.name}" đã ${rule.active ? 'tắt' : 'bật'}.`, 'success')
+  const suggestions = VALUE_SUGGESTIONS[f] ?? []
+  const sel = { fontSize: 11, padding: '3px 6px', borderRadius: 4, border: `1px solid ${C.cardBorder}`, background: '#fff', fontFamily: 'monospace', cursor: 'pointer' }
+
+  const handleAdd = () => {
+    const val = v.trim()
+    if (!val) return
+    onAdd({ f, op, v: val })
+    setV('')
   }
 
-  const deleteRule = (rule) => showConfirm({
-    title: `Xóa quy tắc "${rule.name}"?`,
-    message: 'Giao dịch đã phân loại sẽ không bị ảnh hưởng. Giao dịch mới sẽ không áp dụng quy tắc này nữa.',
-    variant: 'danger', confirmLabel: 'Xóa',
-    onConfirm: () => {
-      setRules(prev => prev.filter(r => r.id !== rule.id))
-      toast(`Đã xóa quy tắc "${rule.name}".`, 'success')
-    },
-  })
+  return (
+    <div style={{
+      display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap',
+      marginTop: 8, padding: '8px 10px',
+      background: '#f8fafc', borderRadius: 6, border: '1px dashed #d1d5db',
+    }}>
+      <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
+        + Điều kiện:
+      </span>
+      <select value={f} onChange={e => { setF(e.target.value); setV('') }} style={sel}>
+        {FIELD_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+      <select value={op} onChange={e => setOp(e.target.value)} style={{ ...sel, width: 48, textAlign: 'center' }}>
+        {Object.keys(OP_COLOR).map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {suggestions.length > 0 ? (
+        <select value={v} onChange={e => setV(e.target.value)} style={{ ...sel, minWidth: 100 }}>
+          <option value="">-- giá trị --</option>
+          {suggestions.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      ) : (
+        <input
+          value={v} onChange={e => setV(e.target.value)}
+          placeholder="nhập giá trị..."
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+          style={{ ...sel, width: 110, cursor: 'text' }}
+        />
+      )}
+      <button onClick={handleAdd} style={{
+        fontSize: 11, padding: '3px 10px', borderRadius: 4,
+        border: '1px solid #bfdbfe', background: '#eff6ff',
+        color: '#1e40af', fontWeight: 700, cursor: 'pointer',
+      }}>Thêm</button>
+    </div>
+  )
+}
+
+/* ── ColTable ─────────────────────────────────────────────────────────────── */
+function ColTable({ cols, rowConds, condKey, onSaveRow }) {
+  const [editingRow, setEditingRow] = useState(null)
+  const [draft, setDraft]           = useState([])
+
+  /* reset khi đổi tab */
+  useEffect(() => { setEditingRow(null) }, [condKey])
+
+  const startEdit = i => {
+    setDraft(rowConds.map(r => [...r]))
+    setEditingRow(i)
+  }
+  const cancel = () => setEditingRow(null)
+  const save   = i => { onSaveRow(condKey, i, draft[i]); setEditingRow(null) }
+
+  const removeChip = (ri, ci) =>
+    setDraft(prev => prev.map((r, i) => i === ri ? r.filter((_, j) => j !== ci) : r))
+  const addChip = (ri, chip) =>
+    setDraft(prev => prev.map((r, i) => i === ri ? [...r, chip] : r))
+
+  const th = { padding: '8px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${C.cardBorder}` }
+
+  return (
+    <div style={{ border: `1px solid ${C.cardBorder}`, borderRadius: radius.md, overflow: 'hidden' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: C.neutralBg }}>
+            <th style={{ ...th, width: '34%' }}>Trạng thái</th>
+            <th style={{ ...th }}>Điều kiện dữ liệu</th>
+            <th style={{ ...th, width: 52 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {cols.map((col, i) => {
+            const isEditing = editingRow === i
+            const chips = isEditing ? (draft[i] ?? []) : (rowConds[i] ?? [])
+            return (
+              <tr key={i} style={{
+                borderBottom: i < cols.length - 1 ? `1px solid ${C.cardBorder}` : 'none',
+                background: isEditing ? '#fffbeb' : (i % 2 ? C.neutralBg : '#fff'),
+              }}>
+                <td style={{ padding: '10px 14px', verticalAlign: isEditing ? 'top' : 'middle' }}>
+                  <span style={{
+                    display: 'inline-block', padding: '3px 10px', borderRadius: 5,
+                    fontSize: 12, fontWeight: 700,
+                    background: col.bg, color: col.color, border: `1px solid ${col.border}`,
+                  }}>
+                    {col.label}
+                  </span>
+                </td>
+                <td style={{ padding: '10px 14px', verticalAlign: isEditing ? 'top' : 'middle' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {chips.map((chip, j) => (
+                      <Chip key={j} chip={chip}
+                        onRemove={isEditing ? () => removeChip(i, j) : undefined} />
+                    ))}
+                    {chips.length === 0 && !isEditing && (
+                      <span style={{ fontSize: 11, color: '#d1d5db', fontStyle: 'italic' }}>Chưa có điều kiện</span>
+                    )}
+                  </div>
+                  {isEditing && (
+                    <>
+                      <AddChipForm onAdd={chip => addChip(i, chip)} />
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <button onClick={() => save(i)} style={{
+                          fontSize: 11, padding: '4px 14px', borderRadius: 5,
+                          border: '1px solid #86efac', background: '#dcfce7',
+                          color: '#166534', fontWeight: 700, cursor: 'pointer',
+                        }}>✓ Lưu</button>
+                        <button onClick={cancel} style={{
+                          fontSize: 11, padding: '4px 14px', borderRadius: 5,
+                          border: `1px solid ${C.cardBorder}`, background: '#fff',
+                          color: C.textMuted, cursor: 'pointer',
+                        }}>Hủy</button>
+                      </div>
+                    </>
+                  )}
+                </td>
+                <td style={{ padding: '10px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
+                  {!isEditing && editingRow === null && (
+                    <button
+                      onClick={() => startEdit(i)}
+                      title="Chỉnh sửa điều kiện"
+                      style={{
+                        background: 'none', border: '1px solid #e5e7eb', borderRadius: 5,
+                        cursor: 'pointer', padding: '4px 7px', fontSize: 13,
+                        color: '#9ca3af', lineHeight: 1,
+                      }}
+                      onMouseEnter={e => Object.assign(e.currentTarget.style, { background: '#f3f4f6', color: '#374151' })}
+                      onMouseLeave={e => Object.assign(e.currentTarget.style, { background: 'none', color: '#9ca3af' })}
+                    >✎</button>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* ── Section config ───────────────────────────────────────────────────────── */
+const SECTIONS = [
+  {
+    id: 'swift', title: 'Swift ↔ Core GL', accent: '#1e40af', accentBg: '#eff6ff', accentBorder: '#bfdbfe',
+    note: 'T = txnDate (ngày GD thực tế của Swift). T+1 khi txnDate ≠ hostDate — Core ghi nhận vào ngày tiếp theo.',
+    tabs: [
+      { label: 'Chiều Đi',  count: SWIFT_COLS_DI.length,  cols: SWIFT_COLS_DI,  condKey: 'SWIFT_DI' },
+      { label: 'Chiều Đến', count: SWIFT_COLS_DEN.length, cols: SWIFT_COLS_DEN, condKey: 'SWIFT_DEN' },
+    ],
+  },
+  {
+    id: 'napas', title: 'NAPAS ↔ Core GL', accent: '#854d0e', accentBg: '#fefce8', accentBorder: '#fde68a',
+    note: 'NAPAS không có timeout — chỉ TC (failed = false) và KTC (failed = true). T = napas.date.',
+    tabs: [
+      { label: 'Chiều Đi',  count: NAPAS_COLS_DI.length,  cols: NAPAS_COLS_DI,  condKey: 'NAPAS_DI' },
+      { label: 'Chiều Đến', count: NAPAS_COLS_DEN.length, cols: NAPAS_COLS_DEN, condKey: 'NAPAS_DEN' },
+    ],
+  },
+  {
+    id: 'core', title: 'Core GL ↔ Swift + NAPAS', accent: '#166534', accentBg: '#dcfce7', accentBorder: '#86efac',
+    note: 'Core làm gốc (T = core.date). Swift và NAPAS so sánh ngày tương đối với core.date.',
+    tabs: [
+      { label: 'Ghi có (Đi)',  count: CORE_COLS_DI.length,  cols: CORE_COLS_DI,  condKey: 'CORE_DI' },
+      { label: 'Ghi nợ (Đến)', count: CORE_COLS_DEN.length, cols: CORE_COLS_DEN, condKey: 'CORE_DEN' },
+    ],
+  },
+]
+
+/* ── Main ─────────────────────────────────────────────────────────────────── */
+export default function DateRules() {
+  const [activeTabs, setActiveTabs] = useState({ swift: 0, napas: 0, core: 0 })
+  const [conds, setConds]           = useState(loadConds)
+
+  const setTab = (sectionId, idx) => setActiveTabs(p => ({ ...p, [sectionId]: idx }))
+
+  const handleSaveRow = (condKey, rowIdx, newChips) => {
+    setConds(prev => {
+      const next = { ...prev, [condKey]: prev[condKey].map((r, i) => i === rowIdx ? newChips : r) }
+      persistConds(next)
+      return next
+    })
+  }
+
+  const handleReset = () => {
+    setConds(DEFAULT_CONDS)
+    localStorage.removeItem(LS_KEY)
+  }
+
+  const modified = JSON.stringify(conds) !== JSON.stringify(DEFAULT_CONDS)
 
   return (
     <PageShell
       title="Phân loại trạng thái đối soát"
-      subtitle="Định nghĩa các trường hợp trạng thái kết quả đối soát — mỗi quy tắc xác định điều kiện và cách xử lý tương ứng."
-      actions={isAdmin ? <Button size="sm" onClick={openCreate}>+ Thêm quy tắc</Button> : null}
+      subtitle="Điều kiện dữ liệu tạo ra từng trạng thái — bấm ✎ để chỉnh sửa, lưu vào trình duyệt."
     >
-      <div style={{ padding: '12px 16px', marginBottom: 16, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: radius.md, fontSize: 13, color: '#1e40af' }}>
-        Mỗi quy tắc mô tả 1 trạng thái kết quả đối soát — điều kiện phát sinh và cách xử lý. Đây là nguồn tham chiếu cho các trạng thái hiển thị trong bảng đối soát.
-        {isOperator && <span style={{ marginLeft: 8, color: '#3b82f6' }}>Operator chỉ xem – Admin có thể chỉnh sửa.</span>}
+      {/* Info bar */}
+      <div style={{
+        padding: '10px 14px', marginBottom: modified ? 10 : 20,
+        background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: radius.md,
+        fontSize: 13, color: '#1e40af', display: 'flex', gap: 10, alignItems: 'center',
+      }}>
+        <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ</span>
+        <span style={{ flex: 1 }}>
+          Bấm <b>✎</b> trên từng dòng để chỉnh sửa điều kiện. Thay đổi được lưu vào bộ nhớ trình duyệt.
+        </span>
+        {modified && (
+          <button onClick={handleReset} style={{
+            flexShrink: 0, fontSize: 11, padding: '4px 12px', borderRadius: 5,
+            border: '1px solid #fecaca', background: '#fef2f2',
+            color: '#dc2626', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+          }}>↺ Khôi phục mặc định</button>
+        )}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {rules.map((rule) => {
-          const sm = RECON_STATUS_META[rule.classification]
+      {/* Modified warning */}
+      {modified && (
+        <div style={{
+          marginBottom: 20, padding: '8px 14px',
+          background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md,
+          fontSize: 12, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ fontWeight: 700 }}>⚠</span>
+          Cấu hình đang khác mặc định — các thay đổi chỉ ảnh hưởng đến hiển thị tài liệu trên trang này.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {SECTIONS.map(sec => {
+          const activeIdx = activeTabs[sec.id]
+          const tab = sec.tabs[activeIdx]
           return (
-            <div key={rule.id} style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden', opacity: rule.active ? 1 : 0.55 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px' }}>
-                {isAdmin && (
-                  <button onClick={() => toggleActive(rule)} title={rule.active ? 'Bật – nhấn để tắt' : 'Tắt – nhấn để bật'}
-                    style={{ flexShrink: 0, width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', background: rule.active ? C.success : C.cardBorder, position: 'relative', transition: 'background 0.15s' }}>
-                    <span style={{ position: 'absolute', top: 3, left: rule.active ? 18 : 3, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
-                  </button>
-                )}
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{rule.name}</span>
-                    {sm && <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: sm.bg, color: sm.color, border: `1px solid ${sm.border}` }}>{sm.label}</span>}
-                    <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: rule.action === 'auto' ? '#f0fdf4' : C.neutralBg, color: rule.action === 'auto' ? '#059669' : C.textMuted, border: `1px solid ${rule.action === 'auto' ? '#bbf7d0' : C.cardBorder}` }}>
-                      {rule.action === 'auto' ? 'Tự động' : 'Thủ công'}
-                    </span>
-                    {!rule.active && <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, background: C.neutralBg, color: C.textMuted, border: `1px solid ${C.cardBorder}` }}>Đã tắt</span>}
-                  </div>
-                  <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 3 }}>
-                    <b>Điều kiện:</b> {CONDITION_LABELS[rule.condition] ?? rule.condition}
-                  </div>
-                  <div style={{ fontSize: 12, color: C.textMuted }}>{rule.description}</div>
-                </div>
-                {isAdmin && (
-                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(rule)}>Sửa</Button>
-                    <Button size="sm" variant="ghost" onClick={() => deleteRule(rule)} style={{ color: C.error }}>Xóa</Button>
-                  </div>
-                )}
+            <div key={sec.id} style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
+              {/* Section header */}
+              <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.cardBorder}`, background: sec.accentBg, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: sec.accent }}>{sec.title}</span>
+                <span style={{ fontSize: 12, color: C.textMuted, flex: 1 }}>{sec.note}</span>
+              </div>
+
+              {/* Direction tabs */}
+              <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg }}>
+                {sec.tabs.map((t, i) => {
+                  const active = i === activeIdx
+                  return (
+                    <button key={i} onClick={() => setTab(sec.id, i)} style={{
+                      padding: '8px 18px', border: 'none',
+                      borderBottom: active ? `2px solid ${sec.accent}` : '2px solid transparent',
+                      background: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13,
+                      fontWeight: active ? 700 : 400, color: active ? sec.accent : C.textMuted,
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      {t.label}
+                      <span style={{
+                        fontSize: 11, padding: '1px 6px', borderRadius: 10,
+                        background: active ? sec.accentBg : C.cardBorder,
+                        color: active ? sec.accent : C.textMuted,
+                        border: `1px solid ${active ? sec.accentBorder : C.cardBorder}`,
+                      }}>
+                        {t.count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Table */}
+              <div style={{ padding: 16 }}>
+                <ColTable
+                  cols={tab.cols}
+                  rowConds={conds[tab.condKey] ?? []}
+                  condKey={tab.condKey}
+                  onSaveRow={handleSaveRow}
+                />
               </div>
             </div>
           )
         })}
       </div>
 
-      {rules.length === 0 && (
-        <div style={{ padding: 48, textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
-          Chưa có quy tắc nào.{isAdmin && ' Nhấn "+ Thêm quy tắc" để tạo.'}
+      {/* Legend */}
+      <div style={{ marginTop: 20, padding: '12px 16px', background: C.neutralBg, border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Chú thích toán tử</div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          {Object.entries(OP_COLOR).map(([op, c]) => (
+            <span key={op} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.textMuted }}>
+              <span style={{ padding: '1px 8px', borderRadius: 4, fontWeight: 700, background: c.bg, color: c.color, border: `1px solid ${c.border}`, fontFamily: 'monospace' }}>{op}</span>
+              {{ '=': 'bằng', '≠': 'khác / có giá trị', '<': 'nhỏ hơn (ngày trước)', '>': 'lớn hơn (ngày sau)' }[op]}
+            </span>
+          ))}
         </div>
-      )}
-
-      {isAdmin && (
-        <DateRuleFormModal
-          open={formOpen} editing={editing}
-          onClose={() => setFormOpen(false)}
-          onSave={(data) => {
-            if (editing) {
-              setRules(prev => prev.map(r => r.id === editing.id ? { ...r, ...data } : r))
-              toast('Đã lưu quy tắc.', 'success')
-            } else {
-              setRules(prev => [...prev, { ...data, id: 'dr_' + Date.now() }])
-              toast('Đã thêm quy tắc mới.', 'success')
-            }
-            setFormOpen(false)
-          }}
-        />
-      )}
-    </PageShell>
-  )
-}
-
-function DateRuleFormModal({ open, editing, onClose, onSave }) {
-  const blank = { name: '', description: '', condition: 'khop_du_3_nguon', classification: 'KHOP', action: 'auto', active: true }
-  const [form, setForm] = useState(() => editing ?? blank)
-  useState(() => { if (open) setForm(editing ?? blank) })
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
-
-  return (
-    <Modal open={open} title={editing ? 'Sửa quy tắc' : 'Thêm quy tắc phân loại'} onClose={onClose} onConfirm={() => onSave(form)} width={580}>
-      <FormRow label="Tên quy tắc">
-        <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="VD: Lệch ngày T+1 (Core)" />
-      </FormRow>
-      <FormRow label="Mô tả">
-        <Input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Mô tả điều kiện và cách xử lý..." />
-      </FormRow>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <FormRow label="Điều kiện">
-          <Select value={form.condition} onChange={e => set('condition', e.target.value)}>
-            {CONDITION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-        </FormRow>
-        <FormRow label="Phân loại kết quả">
-          <Select value={form.classification} onChange={e => set('classification', e.target.value)}>
-            {CLASSIFICATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </Select>
-        </FormRow>
-        <FormRow label="Cách xử lý">
-          <Select value={form.action} onChange={e => set('action', e.target.value)}>
-            <option value="auto">Tự động – không cần xác nhận</option>
-            <option value="manual">Thủ công – Operator xác nhận</option>
-          </Select>
-        </FormRow>
-        <FormRow label="Trạng thái">
-          <Select value={String(form.active)} onChange={e => set('active', e.target.value === 'true')}>
-            <option value="true">Đang bật</option>
-            <option value="false">Đã tắt</option>
-          </Select>
-        </FormRow>
       </div>
-    </Modal>
+    </PageShell>
   )
 }

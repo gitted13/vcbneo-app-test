@@ -6,7 +6,8 @@ import { Input, Select } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
-import { RESOLUTION_OF, NAPAS_COLS_DI, NAPAS_COLS_DEN, isT1 } from '../../data/reconcile'
+import { RESOLUTION_OF, NAPAS_COLS_DI, NAPAS_COLS_DEN } from '../../data/reconcile'
+import { downloadDetailXlsx } from '../../utils/export'
 import { DirectionToggle, KpiBar, ResolveRow, NapasStatusCell, NapasTypeTag, StatusBadge, Dash } from '../../components/ReconShared'
 import { api } from '../../api/client'
 
@@ -32,10 +33,11 @@ export default function NapasCore() {
   const [page, setPage]      = useState(1)
   const [pageSize, setPS]    = useState(30)
   const [activeKpi, setKpi]  = useState(null)
-  const [filterDay, setFD]   = useState('')
+  const { filterFrom, setFilterFrom: setFrom, filterTo, setFilterTo: setTo } = useApp()
 
   const canResolve = user?.role === 'Admin' || user?.role === 'Operator'
   const toggleKpi = key => setKpi(p => p === key ? null : key)
+  const dayToISO = s => { const [d, m, y] = s.split('/'); return `${y}-${m}-${d}` }
 
   const onResolve = (rowId, note) => {
     const row = rows.find(r => r.id === rowId)
@@ -47,26 +49,18 @@ export default function NapasCore() {
   }
 
   const activeCols    = dir === 'Đi' ? NAPAS_COLS_DI : NAPAS_COLS_DEN
-  const base          = rows.filter(r => r.napas && r.direction === dir)
-  const days          = [...new Set(base.map(r => r.day))].filter(Boolean).sort()
-  const unmatchedBase = base.filter(r => !r.core)
-  const needsActBase  = base.filter(r => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by)
-  const viewBase      = activeView === 'unmatched'    ? unmatchedBase
-                      : activeView === 'needs_action' ? needsActBase
-                      : base
+  const KPI_FN        = Object.fromEntries(activeCols.map((col, i) => [`col${i}`, col.filterFn]))
 
-  const KPI_FN = dir === 'Đi' ? {
-    tc_t:   r => !r.napas?.failed && !!r.core && !isT1(r),
-    tc_tm1: r => !r.napas?.failed && !!r.core &&  isT1(r),
-    ktc:    r =>  !!r.napas?.failed,
-  } : {
-    tc_t:     r => !r.napas?.failed && !!r.core && r.napas?.date === r.core?.date,
-    tc_tm1:   r => !r.napas?.failed && !!r.core && r.napas?.type === 'QT' && r.napas?.date !== r.core?.date,
-    chi_core: r => !r.napas?.failed && !r.core,
-  }
+  const base          = rows.filter(r => r.napas && r.direction === dir)
+  const dateBase      = base.filter(r => {
+    if (filterFrom && r.day && dayToISO(r.day) < filterFrom) return false
+    if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
+    return true
+  })
+  const unmatchedBase = dateBase.filter(r => !r.core)
+  const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {
-    if (filterDay && r.day !== filterDay) return false
     if (search && !r.trace.includes(search) && !(r.sequence ?? '').includes(search)) return false
     if (activeView === 'all') {
       if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
@@ -78,34 +72,18 @@ export default function NapasCore() {
   })
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  useEffect(() => { setPage(1); setFC(''); setKTC(''); setFD(''); setKpi(null); setView('all') }, [dir])
-  useEffect(() => { setPage(1) }, [filterCol, filterKTC, activeKpi, search, activeView])
+  useEffect(() => { setPage(1); setFC(''); setKTC(''); setFrom(''); setTo(''); setKpi(null); setView('all') }, [dir])
+  useEffect(() => { setPage(1) }, [filterCol, filterKTC, activeKpi, search, activeView, filterFrom, filterTo])
 
   /* KPI metrics */
-  let kpiItems
-  if (dir === 'Đi') {
-    const tc     = base.filter(r => !r.napas.failed && r.core)
-    const tcT    = tc.filter(r => !isT1(r))
-    const tcTm1  = tc.filter(r =>  isT1(r))
-    const ktc    = base.filter(r =>  r.napas.failed)
-    kpiItems = [
-      { label: 'Tổng NAPAS Đi',        val: base.length,  color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
-      { label: 'Thành công – Core ngày T',   val: tcT.length,   color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', onClick: () => toggleKpi('tc_t'),   isActive: activeKpi === 'tc_t' },
-      { label: 'Thành công – Core ngày T-1', val: tcTm1.length, color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', onClick: () => toggleKpi('tc_tm1'), isActive: activeKpi === 'tc_tm1' },
-      { label: 'Không thành công',           val: ktc.length,   color: '#dc2626', bg: '#fef2f2', border: '#fecaca', onClick: () => toggleKpi('ktc'),    isActive: activeKpi === 'ktc' },
-    ]
-  } else {
-    const tc      = base.filter(r => !r.napas.failed && r.core)
-    const tcT     = tc.filter(r => r.napas.date === r.core?.date)
-    const tcTm1   = tc.filter(r => r.napas.type === 'QT' && r.napas.date !== r.core?.date)
-    const chiCore = base.filter(r => !r.napas.failed && !r.core)
-    kpiItems = [
-      { label: 'Tổng NAPAS Đến',       val: base.length,    color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
-      { label: 'Thành công – Core ngày T',   val: tcT.length,    color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', onClick: () => toggleKpi('tc_t'),    isActive: activeKpi === 'tc_t' },
-      { label: 'Thành công – Core ngày T-1', val: tcTm1.length,  color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', onClick: () => toggleKpi('tc_tm1'),  isActive: activeKpi === 'tc_tm1' },
-      { label: 'Core không ghi nhận',        val: chiCore.length, color: '#dc2626', bg: '#fef2f2', border: '#fecaca', onClick: () => toggleKpi('chi_core'), isActive: activeKpi === 'chi_core' },
-    ]
-  }
+  const kpiItems = [
+    { label: `Tổng NAPAS ${dir}`, val: dateBase.length, color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+    ...activeCols.map((col, i) => ({
+      label: col.label, val: dateBase.filter(col.filterFn).length,
+      color: col.color, bg: col.bg, border: col.border,
+      onClick: () => toggleKpi(`col${i}`), isActive: activeKpi === `col${i}`,
+    })),
+  ]
 
   const th = (extra = {}) => ({
     padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700,
@@ -120,6 +98,16 @@ export default function NapasCore() {
   const coreBorder = dir === 'Đi' ? '#bbf7d0'  : '#bfdbfe'
   const coreAcc    = dir === 'Đi' ? '#86efac'  : '#93c5fd'
   const coreCellBg = dir === 'Đi' ? '#f0fdf4'  : '#eff6ff'
+
+  const handleExport = async () => {
+    const headers = ['Ngày', 'Trace', 'Ngày GD', 'Giờ GD', 'Loại (GD/QT)', 'TC/KTC', 'Ngày Core', 'Loại ghi', 'Số tiền (VNĐ)', 'Kết quả khớp']
+    const rows = filtered.map(r => {
+      const col = activeCols.find(c => c.filterFn(r))
+      return [r.day, r.trace, r.napas?.date ?? '', r.napas?.time ?? '', r.napas?.type ?? '', r.napas?.failed ? 'KTC' : 'TC', r.core?.date ?? '', r.core?.entry ?? '', r.amount, col?.label ?? r.recon_status]
+    })
+    const date = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')
+    await downloadDetailXlsx({ title: 'ĐỐI CHIẾU NAPAS – CORE GL', dir, filterFrom, filterTo, headers, rows, headerBg: '#92400e', filename: `NAPAS_Core_${dir}_${date}` })
+  }
 
   if (loading) return <PageShell title="Đối chiếu NAPAS với Core GL"><div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Đang tải dữ liệu...</div></PageShell>
 
@@ -166,9 +154,8 @@ export default function NapasCore() {
       {/* View tab switcher */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
         {[
-          { key: 'all',          label: 'Tất cả',     count: base.length,           color: C.primary,  badgeBg: '#eff6ff' },
-          { key: 'unmatched',    label: 'Không khớp', count: unmatchedBase.length,  color: '#dc2626',  badgeBg: '#fef2f2' },
-          { key: 'needs_action', label: 'Cần xử lý',  count: needsActBase.length,   color: '#d97706',  badgeBg: '#fffbeb' },
+          { key: 'all',       label: 'Tất cả',     count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
+          { key: 'unmatched', label: 'Không khớp', count: unmatchedBase.length, color: '#dc2626', badgeBg: '#fef2f2' },
         ].map(t => {
           const active = activeView === t.key
           return (
@@ -207,27 +194,15 @@ export default function NapasCore() {
           </div>
         </div>
       )}
-      {activeView === 'needs_action' && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#d97706', fontWeight: 700 }}>!</span>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#d97706' }}>
-              {needsActBase.length} giao dịch chờ xử lý thủ công
-            </div>
-            <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
-              NAPAS thất bại hoặc không khớp Core cần xác nhận hoàn tiền hoặc tra cứu với đối tác NAPAS.
-            </div>
-          </div>
-        </div>
-      )}
 
       <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg }}>
-          <Input placeholder="Tìm trace..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1 }} />
-          <Select value={filterDay} onChange={e => setFD(e.target.value)} style={{ width: 130 }}>
-            <option value="">Tất cả ngày</option>
-            {days.map(d => <option key={d} value={d}>{d}</option>)}
-          </Select>
+        <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg, flexWrap: 'wrap' }}>
+          <Input placeholder="Tìm trace..." value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Input type="date" value={filterFrom} onChange={e => setFrom(e.target.value)} style={{ width: 150 }} />
+            <span style={{ fontSize: 12, color: C.textMuted, flexShrink: 0 }}>–</span>
+            <Input type="date" value={filterTo} onChange={e => setTo(e.target.value)} style={{ width: 150 }} />
+          </div>
           <Select value={filterKTC} onChange={e => setKTC(e.target.value)} style={{ width: 140 }}>
             <option value="">TC + KTC</option>
             <option value="TC">Chỉ TC</option>
@@ -239,6 +214,7 @@ export default function NapasCore() {
               <option key={i} value={i}>{col.label}</option>
             ))}
           </Select>
+          <Button size="sm" variant="subtle" onClick={handleExport}>↓ Xuất Excel</Button>
         </div>
 
         <div style={{ overflowX: 'auto' }}>

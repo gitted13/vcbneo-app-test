@@ -3,8 +3,10 @@ import { createContext, useContext, useState, useCallback } from 'react'
 const AppContext = createContext(null)
 
 export function AppProvider({ children }) {
-  const [toasts, setToasts]   = useState([])
-  const [confirm, setConfirm] = useState(null)
+  const [toasts, setToasts]       = useState([])
+  const [confirm, setConfirm]     = useState(null)
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo]     = useState('')
 
   const toast = useCallback((msg, variant = 'success', duration = 3500) => {
     const id = Date.now() + Math.random()
@@ -16,7 +18,7 @@ export function AppProvider({ children }) {
   const closeConfirm = () => setConfirm(null)
 
   return (
-    <AppContext.Provider value={{ toast, toasts, setToasts, confirm, showConfirm, closeConfirm }}>
+    <AppContext.Provider value={{ toast, toasts, setToasts, confirm, showConfirm, closeConfirm, filterFrom, setFilterFrom, filterTo, setFilterTo }}>
       {children}
     </AppContext.Provider>
   )

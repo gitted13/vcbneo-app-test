@@ -8,8 +8,6 @@ import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { C, radius, shadow } from '../../theme'
-import { RESOLUTION_OF } from '../../data/reconcile'
-import { api } from '../../api/client'
 
 /* ── Mock data (3 ngày 01–03/02/2026, khớp với trang Đối soát) ─────────────── */
 const KPI = [
@@ -86,17 +84,6 @@ export default function Reports() {
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [activeDate, setActiveDate] = useState('03/02')
-  const [liveRows, setLiveRows] = useState([])
-
-  useEffect(() => {
-    api.getRows().then(res => setLiveRows(res.rows ?? [])).catch(() => {})
-  }, [])
-
-  const chiSwift   = liveRows.filter(r => r.recon_status === 'CHI_SWIFT')
-  const chiNapas   = liveRows.filter(r => r.recon_status === 'CHI_NAPAS')
-  const chiCore    = liveRows.filter(r => r.recon_status === 'CHI_CORE')
-  const needsAct   = liveRows.filter(r => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by)
-  const totalAlert = chiSwift.length + chiNapas.length + chiCore.length
 
   const openCreate = () => { setEditing(null); setFormOpen(true) }
   const openEdit   = (r)  => { setEditing(r);  setFormOpen(true) }
@@ -133,52 +120,6 @@ export default function Reports() {
           </div>
         ))}
       </div>
-
-      {/* ── Alerts row ── */}
-      {(totalAlert > 0 || needsAct.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 20 }}>
-          {chiSwift.length > 0 && (
-            <div style={{ padding: '14px 18px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#dc2626', lineHeight: 1 }}>{chiSwift.length}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9b1c1c', marginTop: 3 }}>Chỉ Swift — không khớp Core/NAPAS</div>
-                <div style={{ fontSize: 10, color: '#9b1c1c', marginTop: 1 }}>Kiểm tra thủ công, liên hệ Core team</div>
-              </div>
-            </div>
-          )}
-          {chiNapas.length > 0 && (
-            <div style={{ padding: '14px 18px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#dc2626', lineHeight: 1 }}>{chiNapas.length}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9b1c1c', marginTop: 3 }}>Chỉ NAPAS — không khớp Swift/Core</div>
-                <div style={{ fontSize: 10, color: '#9b1c1c', marginTop: 1 }}>Liên hệ NAPAS tra cứu giao dịch</div>
-              </div>
-            </div>
-          )}
-          {chiCore.length > 0 && (
-            <div style={{ padding: '14px 18px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#7c3aed', lineHeight: 1 }}>{chiCore.length}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#4c1d95', marginTop: 3 }}>Chỉ Core — không khớp Swift/NAPAS</div>
-                <div style={{ fontSize: 10, color: '#4c1d95', marginTop: 1 }}>Có thể là batch NP_TREO — kiểm tra</div>
-              </div>
-            </div>
-          )}
-          {needsAct.length > 0 && (
-            <div style={{ padding: '14px 18px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 800, flexShrink: 0 }}>i</div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#d97706', lineHeight: 1 }}>{needsAct.length}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', marginTop: 3 }}>Cần xử lý thủ công</div>
-                <div style={{ fontSize: 10, color: '#92400e', marginTop: 1 }}>Chưa được xác nhận — Operator review</div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ── Charts row ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14, marginBottom: 20 }}>
