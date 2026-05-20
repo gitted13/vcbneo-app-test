@@ -8,15 +8,17 @@ import Modal from '../../components/Modal'
 import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
 import { C, radius, shadow } from '../../theme'
+import { RECON_STATUS_META, RESOLUTION_OF } from '../../data/reconcile'
 
 export default function AppSettings() {
   return (
     <PageShell title="Cài đặt ứng dụng" subtitle="Cấu hình chung, phân quyền, kết nối RPA và thông báo hệ thống.">
-      <Tabs tabs={['Chung', 'Phân quyền', 'Kết nối RPA', 'Thông báo']}>
+      <Tabs tabs={['Chung', 'Phân quyền', 'Kết nối RPA', 'Thông báo', 'Trạng thái đối soát']}>
         <GeneralTab />
         <RolesTab />
         <RPAConnTab />
         <NotifTab />
+        <ReconStatusTab />
       </Tabs>
     </PageShell>
   )
@@ -79,7 +81,7 @@ function GeneralTab() {
 }
 
 /* ── Roles ──────────────────────────────────────────────────────────────────── */
-const MODULES = ['Loại file', 'Nhập dữ liệu', 'Lịch sử', 'Kho dữ liệu', 'Logic', 'Báo cáo', 'Cài đặt']
+const MODULES = ['Cấu hình file', 'Tải lên dữ liệu', 'Kho dữ liệu', 'Quy tắc so khớp', 'Đối soát', 'Báo cáo', 'Cài đặt']
 
 const INIT_USERS = [
   { id: 1, name: 'Nguyễn Văn A', email: 'nva@vcb.com.vn', role: 'Admin',    active: true,  perms: [1,1,1,1,1,1,1] },
@@ -206,44 +208,128 @@ function UserFormModal({ open, editing, onClose, onSave }) {
 
 /* ── RPA Connection ─────────────────────────────────────────────────────────── */
 function RPAConnTab() {
+  const STATUS = {
+    connected: true,
+    lastRunId: 'RPA-0044', lastRun: '2026-02-05 06:00', lastRunStatus: 'success',
+    nextScheduled: '2026-02-06 06:00',
+    host: '\\\\rpa-server\\vcbneo', process: 'VCBNeo_NAPAS_Reconcile', uptime: '99.2%',
+    schedule: 'T2–T6, 06:00',
+    inputFolder: '\\\\server\\rpa\\vcbneo\\input',
+    archiveFolder: '\\\\server\\rpa\\vcbneo\\archive',
+    filePattern: '*.xlsx',
+  }
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-      <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderBottom: `1px solid #fde68a` }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#d97706' }}>Kết nối thư mục</div>
-          <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 2 }}>Đường dẫn thư mục nguồn & lưu trữ</div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Status banner */}
+      <div style={{ display: 'flex', gap: 20, alignItems: 'center', padding: '16px 24px', background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '1px solid #bbf7d0', borderRadius: radius.lg, boxShadow: shadow.sm }}>
+        <div style={{ width: 12, height: 12, borderRadius: '50%', background: C.success, flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 3 }}>RPA đang kết nối và hoạt động</div>
+          <div style={{ fontSize: 12, color: C.textMuted, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <span>Host: <code style={{ color: C.primary, fontFamily: 'monospace' }}>{STATUS.host}</code></span>
+            <span>Process: <code style={{ fontFamily: 'monospace', color: C.text }}>{STATUS.process}</code></span>
+            <span>Uptime: <b style={{ color: C.success }}>{STATUS.uptime}</b></span>
+          </div>
         </div>
-        <div style={{ padding: '20px' }}>
-          <FormRow label="Thư mục nguồn RPA" hint="RPA sẽ đẩy file vào thư mục này"><Input defaultValue="\\\\server\\rpa\\vcbneo\\input" /></FormRow>
-          <FormRow label="Thư mục lưu trữ" hint="File sau khi xử lý sẽ được di chuyển đây"><Input defaultValue="\\\\server\\rpa\\vcbneo\\archive" /></FormRow>
-          <FormRow label="Pattern tên file" hint="Regex hoặc glob để lọc đúng file"><Input defaultValue="*.xlsx" /></FormRow>
-          <Button size="sm">Lưu &amp; Kiểm tra kết nối</Button>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 2 }}>Lần chạy tiếp theo</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{STATUS.nextScheduled}</div>
         </div>
       </div>
 
-      <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', background: 'linear-gradient(135deg,#f5f3ff,#ede9fe)', borderBottom: `1px solid #c4b5fd` }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed' }}>Lịch chạy tự động</div>
-          <div style={{ fontSize: 11, color: '#8b5cf6', marginTop: 2 }}>Cron, ngày trong tuần</div>
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+        {[
+          { label: 'Lần chạy gần nhất', val: STATUS.lastRunId, sub: STATUS.lastRun,             color: C.primary, bg: '#eff6ff' },
+          { label: 'Kết quả lần cuối', val: 'Thành công',     sub: '6/6 file nhận đủ',         color: C.success, bg: '#f0fdf4' },
+          { label: 'Lịch chạy',        val: STATUS.schedule,  sub: 'Cron: 0 6 * * 1-5',        color: '#d97706', bg: '#fffbeb' },
+        ].map(s => (
+          <div key={s.label} style={{ padding: '16px 18px', background: s.bg, border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: s.color, marginBottom: 4 }}>{s.val}</div>
+            <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{s.label}</div>
+            <div style={{ fontSize: 11, color: C.textLight, marginTop: 2 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Read-only config */}
+      <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, overflow: 'hidden', boxShadow: shadow.sm }}>
+        <div style={{ padding: '14px 20px', background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}` }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Cấu hình RPA hiện tại</div>
+          <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>Chỉ đọc – cấu hình được quản lý bởi quản trị viên hệ thống</div>
         </div>
-        <div style={{ padding: '20px' }}>
-          <FormRow label="Bật tự động hóa">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-              <input type="checkbox" defaultChecked style={{ accentColor: C.primary, width: 15, height: 15 }} />
-              Kích hoạt lịch chạy RPA
-            </label>
-          </FormRow>
-          <FormRow label="Thời gian chạy (HH:MM)"><Input type="time" defaultValue="06:00" /></FormRow>
-          <FormRow label="Ngày trong tuần">
-            {['T2','T3','T4','T5','T6','T7','CN'].map((d, i) => (
-              <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginRight: 12, fontSize: 13, cursor: 'pointer' }}>
-                <input type="checkbox" defaultChecked={i < 5} style={{ accentColor: C.primary }} />
-                {d}
-              </label>
-            ))}
-          </FormRow>
-          <Button size="sm">Lưu lịch</Button>
+        <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {[
+            { label: 'Thư mục nguồn',    val: STATUS.inputFolder },
+            { label: 'Thư mục lưu trữ',  val: STATUS.archiveFolder },
+            { label: 'Pattern tên file',  val: STATUS.filePattern },
+            { label: 'Lịch chạy (Cron)', val: '0 6 * * 1-5  (T2–T6, 06:00)' },
+          ].map(row => (
+            <div key={row.label}>
+              <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{row.label}</div>
+              <code style={{ fontSize: 12, color: C.text, background: C.neutralBg, padding: '4px 8px', borderRadius: 4, border: `1px solid ${C.cardBorder}`, display: 'block', wordBreak: 'break-all' }}>{row.val}</code>
+            </div>
+          ))}
         </div>
+      </div>
+
+      <div style={{ fontSize: 12, color: C.textMuted, padding: '10px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md }}>
+        Để thay đổi cấu hình RPA, vui lòng liên hệ quản trị viên hệ thống. Lịch sử chạy chi tiết xem trong tab <b>Lịch sử tải lên</b> của module <b>Tải lên dữ liệu</b>.
+      </div>
+    </div>
+  )
+}
+
+/* ── Recon Status Legend ────────────────────────────────────────────────────── */
+function ReconStatusTab() {
+  const entries = Object.entries(RECON_STATUS_META)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ padding: '12px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: radius.md, fontSize: 12, color: '#0284c7' }}>
+        Đây là 10 trạng thái đối soát được sử dụng xuyên suốt hệ thống — trong bảng đối soát, báo cáo tổng hợp và bộ lọc.
+        Mỗi trạng thái tương ứng với một kịch bản khớp/lệch cụ thể giữa Swift, NAPAS và Core GL.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+        {entries.map(([key, m]) => (
+          <div key={key} style={{
+            background: '#fff', border: `1px solid ${m.border ?? C.cardBorder}`,
+            borderLeft: `4px solid ${m.color}`,
+            borderRadius: radius.md, padding: '14px 16px',
+            boxShadow: shadow.sm,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{
+                padding: '3px 9px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                background: m.bg, color: m.color, border: `1px solid ${m.border ?? m.color}`,
+                whiteSpace: 'nowrap',
+              }}>
+                {m.label}
+              </span>
+              <code style={{ fontSize: 10, color: C.textMuted, background: C.neutralBg, padding: '2px 6px', borderRadius: 3, fontFamily: 'monospace' }}>
+                {key}
+              </code>
+            </div>
+            <div style={{ fontSize: 12, color: C.text, lineHeight: 1.5, marginBottom: m.action ? 6 : 0 }}>
+              {m.desc ?? '—'}
+            </div>
+            {RESOLUTION_OF[key] && (
+              <div style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
+                <span style={{ fontWeight: 700, color: C.textMuted }}>Xử lý:</span>
+                <span style={{ fontWeight: 600, color: RESOLUTION_OF[key].color }}>{RESOLUTION_OF[key].label}</span>
+                {RESOLUTION_OF[key].needsAction && (
+                  <span style={{ fontSize:9, fontWeight:700, color:'#d97706', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:3, padding:'1px 5px' }}>Thủ công</span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, color: C.textMuted, padding: '10px 14px', background: C.neutralBg, border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
+        Các trạng thái này được định nghĩa trong <code style={{ fontFamily:'monospace' }}>frontend/src/data/reconcile.js</code> → <code style={{ fontFamily:'monospace' }}>RECON_STATUS_META</code>.
+        Backend trả về mã trạng thái dưới dạng chuỗi (ví dụ: <code style={{ fontFamily:'monospace' }}>"KHOP"</code>) trong trường <code style={{ fontFamily:'monospace' }}>recon_status</code> của mỗi giao dịch.
       </div>
     </div>
   )

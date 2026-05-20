@@ -1,99 +1,28 @@
 import { useState } from 'react'
 import PageShell from '../../components/PageShell'
-import Card from '../../components/Card'
 import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import Modal from '../../components/Modal'
 import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
+import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
 
-const INITIAL_LOGICS = [
-  {
-    id: 'jl_001',
-    name: 'Swift Đi vs Napas Đi',
-    leftTable: 'swift_di', rightTable: 'napas_di',
-    direction: 'forward',
-    joinType: 'left',
-    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
-    dateOffset: 'T_to_T1',
-    groupBy: 'date_status',
-    resultTable: 'result_di',
-    lastRun: '2026-02-05 09:00',
-    lastResult: { matched: 2664, onlyLeft: 24, onlyRight: 34 },
-    status: 'success',
-  },
-  {
-    id: 'jl_002',
-    name: 'Swift Đến vs Napas Đến',
-    leftTable: 'swift_den', rightTable: 'napas_den',
-    direction: 'backward',
-    joinType: 'left',
-    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
-    dateOffset: 'T_to_T1',
-    groupBy: 'date_status',
-    resultTable: 'result_den',
-    lastRun: '2026-02-05 09:01',
-    lastResult: { matched: 2237, onlyLeft: 31, onlyRight: 29 },
-    status: 'success',
-  },
-  {
-    id: 'jl_003',
-    name: 'Swift Đi vs Core (Ghi có)',
-    leftTable: 'swift_di', rightTable: 'core',
-    direction: 'forward',
-    joinType: 'left',
-    matchFields: [{ left: 'trace', right: 'trace' }],
-    dateOffset: 'same',
-    groupBy: 'date_status',
-    resultTable: 'result_di_core',
-    lastRun: null,
-    lastResult: null,
-    status: 'idle',
-  },
-]
+/*
+ * Mỗi rule so khớp được định nghĩa ở cấp nguồn (Swift / Core / NAPAS),
+ * không phải subtable. Backend tự map sang bảng cụ thể dựa vào direction:
+ *   Swift + Đi   → swift_di       Swift + Đến  → swift_den
+ *   NAPAS + Đi   → napas_di       NAPAS + Đến  → napas_den
+ *   Core  + Đi   → core_ghino     Core  + Đến  → core_ghico
+ */
 
-/* mock result rows keyed by logic id + tab */
-const MOCK_RESULT = {
-  jl_001: {
-    matched: [
-      { trace: '700112345', swift_date: '20260201', napas_date: '20260131', swift_amount: 5000000, napas_amount: 5000000,  match: 'KHOP' },
-      { trace: '700112346', swift_date: '20260201', napas_date: '20260131', swift_amount: 12000000, napas_amount: 12000000, match: 'KHOP' },
-      { trace: '700112349', swift_date: '20260202', napas_date: '20260201', swift_amount: 2100000, napas_amount: 2100000,  match: 'KHOP' },
-    ],
-    onlyLeft: [
-      { trace: '700112347', swift_date: '20260202', swift_amount: 3500000, status: 'TIMEOUT', ly_do: 'Không có trên Napas' },
-      { trace: '700112348', swift_date: '20260201', swift_amount: 8000000, status: 'THAT BAI', ly_do: 'Không có trên Napas' },
-    ],
-    onlyRight: [
-      { trace: '700199001', napas_date: '20260131', napas_amount: 4500000, ly_do: 'Không có trên Swift' },
-      { trace: '700199002', napas_date: '20260131', napas_amount: 6700000, ly_do: 'Không có trên Swift' },
-    ],
-  },
-  jl_002: {
-    matched: [
-      { trace: '700212345', swift_date: '20260201', napas_date: '20260131', swift_amount: 3200000, napas_amount: 3200000, match: 'KHOP' },
-      { trace: '700212346', swift_date: '20260201', napas_date: '20260131', swift_amount: 9100000, napas_amount: 9100000, match: 'KHOP' },
-    ],
-    onlyLeft: [
-      { trace: '700212347', swift_date: '20260202', swift_amount: 7700000, status: 'TIMEOUT', ly_do: 'Không có trên Napas' },
-    ],
-    onlyRight: [
-      { trace: '700299001', napas_date: '20260131', napas_amount: 2200000, ly_do: 'Không có trên Swift' },
-    ],
-  },
-}
+const SOURCES = ['Swift', 'Core', 'NAPAS']
 
-const RESULT_COLS = {
-  matched:   ['trace', 'swift_date', 'napas_date', 'swift_amount', 'napas_amount', 'match'],
-  onlyLeft:  ['trace', 'swift_date', 'swift_amount', 'status', 'ly_do'],
-  onlyRight: ['trace', 'napas_date', 'napas_amount', 'ly_do'],
-}
-
-const DATE_OFFSETS = [
-  { value: 'same',     label: 'T → T (cùng ngày)' },
-  { value: 'T_to_T1',  label: 'T → T+1 (file T, Napas T+1)' },
-  { value: 'Tm1_to_T', label: 'T-1 → T (file T-1, Napas T)' },
+const DIRECTION_OPTIONS = [
+  { value: 'Đi',    label: 'Đi' },
+  { value: 'Đến',   label: 'Đến' },
+  { value: 'Cả hai', label: 'Cả hai (Đi + Đến)' },
 ]
 
 const JOIN_TYPES = [
@@ -102,237 +31,283 @@ const JOIN_TYPES = [
   { value: 'full',  label: 'Full Outer Join' },
 ]
 
-const TABLES = ['swift_di', 'swift_den', 'core', 'napas_di', 'napas_den', 'napas_di_fail']
+const DIRECTION_COLOR = { 'Đi': '#2563eb', 'Đến': '#7c3aed', 'Cả hai': '#059669' }
+const DIRECTION_BG    = { 'Đi': '#eff6ff', 'Đến': '#f5f3ff', 'Cả hai': '#f0fdf4' }
 
+const INITIAL_LOGICS = [
+  {
+    id: 'jl_001', name: 'Swift vs NAPAS',
+    leftSource: 'Swift', rightSource: 'NAPAS', direction: 'Đi', joinType: 'left',
+    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
+    lastRun: '2026-02-05 09:00', status: 'success',
+  },
+  {
+    id: 'jl_002', name: 'Swift vs NAPAS',
+    leftSource: 'Swift', rightSource: 'NAPAS', direction: 'Đến', joinType: 'left',
+    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
+    lastRun: '2026-02-05 09:01', status: 'success',
+  },
+  {
+    id: 'jl_003', name: 'Swift vs Core',
+    leftSource: 'Swift', rightSource: 'Core', direction: 'Đi', joinType: 'left',
+    matchFields: [{ left: 'sequence', right: 'seq' }, { left: 'amount', right: 'amount' }],
+    lastRun: null, status: 'idle',
+  },
+  {
+    id: 'jl_004', name: 'Swift vs Core',
+    leftSource: 'Swift', rightSource: 'Core', direction: 'Đến', joinType: 'left',
+    matchFields: [{ left: 'sequence', right: 'seq' }, { left: 'amount', right: 'amount' }],
+    lastRun: null, status: 'idle',
+  },
+  {
+    id: 'jl_005', name: 'Core vs NAPAS',
+    leftSource: 'Core', rightSource: 'NAPAS', direction: 'Đi', joinType: 'left',
+    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
+    lastRun: null, status: 'idle',
+  },
+  {
+    id: 'jl_006', name: 'Core vs NAPAS',
+    leftSource: 'Core', rightSource: 'NAPAS', direction: 'Đến', joinType: 'left',
+    matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
+    lastRun: null, status: 'idle',
+  },
+]
+
+const FIELD_LABEL = { trace: 'Số trace', amount: 'Số tiền', sequence: 'Số sequence', seq: 'Số sequence' }
+
+/* ── Pair groups for display ─────────────────────────────────────────────────── */
+const PAIR_META = {
+  'Swift|NAPAS': { color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+  'NAPAS|Swift': { color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+  'Swift|Core':  { color: '#059669', bg: '#f0fdf4', border: '#bbf7d0' },
+  'Core|Swift':  { color: '#059669', bg: '#f0fdf4', border: '#bbf7d0' },
+  'Core|NAPAS':  { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+  'NAPAS|Core':  { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
+}
+
+function pairKey(item) { return `${item.leftSource}|${item.rightSource}` }
+function pairMeta(item) { return PAIR_META[pairKey(item)] ?? { color: C.primary, bg: C.neutralBg, border: C.cardBorder } }
+
+/* ── Main page ───────────────────────────────────────────────────────────────── */
 export default function JoinLogic() {
-  const [logics, setLogics] = useState(INITIAL_LOGICS)
+  const { showConfirm, toast } = useApp()
+  const { user }               = useAuth()
+  const isAdmin  = user?.role === 'Admin'
+  const isViewer = user?.role === 'Viewer'
+
+  const [logics, setLogics]     = useState(INITIAL_LOGICS)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
 
   const openCreate = () => { setEditing(null); setFormOpen(true) }
   const openEdit   = (item) => { setEditing(item); setFormOpen(true) }
-  const deleteItem = (id) => setLogics(prev => prev.filter(l => l.id !== id))
+
+  const deleteItem = (item) => showConfirm({
+    title: `Xóa rule "${item.name} – ${item.direction}"?`,
+    message: 'Thao tác này sẽ xóa cấu hình so khớp. Không thể hoàn tác.',
+    variant: 'danger',
+    confirmLabel: 'Xóa',
+    onConfirm: () => {
+      setLogics(prev => prev.filter(l => l.id !== item.id))
+      toast(`Đã xóa rule "${item.name} – ${item.direction}".`, 'success')
+    },
+  })
 
   return (
     <PageShell
-      title="Logic đối soát"
-      subtitle="Định nghĩa quy tắc ghép bảng để so sánh dữ liệu giữa các nguồn. Mỗi logic cho ra một bảng kết quả có thể xem trực tiếp."
-      actions={<Button onClick={openCreate}>+ Tạo logic mới</Button>}
+      title="Cấu hình đối chiếu"
+      subtitle="Định nghĩa trường so khớp giữa 3 cặp nguồn dữ liệu (Swift / Core / NAPAS). Chiều GD và trường ghép là điều kiện của từng rule."
+      actions={isAdmin ? <Button size="sm" onClick={openCreate}>+ Tạo rule mới</Button> : null}
     >
       {logics.length === 0
-        ? <EmptyState icon="🔗" title="Chưa có logic nào" description="Tạo logic đối soát đầu tiên để bắt đầu so sánh dữ liệu giữa các bảng." action="+ Tạo logic mới" onAction={openCreate} />
-        : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {logics.map(item => (
-              <LogicCard key={item.id} item={item} onEdit={() => openEdit(item)} onDelete={() => deleteItem(item.id)} />
+        ? <EmptyState icon="🔗" title="Chưa có rule nào" description="Tạo rule so khớp đầu tiên." action={isAdmin ? '+ Tạo rule mới' : undefined} onAction={isAdmin ? openCreate : undefined} />
+        : (
+          <>
+            <div style={{ padding: '10px 16px', marginBottom: 12, background: '#f8fafc', border: `1px solid ${C.cardBorder}`, borderRadius: radius.md, fontSize: 13, color: C.textMuted }}>
+              Mỗi rule định nghĩa cách ghép 2 nguồn theo chiều giao dịch và các trường chỉ định. Quy tắc thời gian cấu hình tại trang <b>Quy tắc thời gian</b>.
+            </div>
+
+            {/* Direction → Core entry mapping */}
+            <div style={{ marginBottom: 20, padding: '12px 16px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: radius.md }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Chiều GD → Loại ghi Core</div>
+              <div style={{ display: 'flex', gap: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ padding: '4px 12px', borderRadius: 6, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, fontWeight: 700, color: '#1d4ed8' }}>GD Đi</span>
+                  <span style={{ color: '#6b7280', fontSize: 13 }}>→</span>
+                  <span style={{ padding: '4px 12px', borderRadius: 6, background: '#dcfce7', border: '1px solid #86efac', fontSize: 12, fontWeight: 700, color: '#166534' }}>Core Ghi có</span>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>(Swift Đi / NAPAS Đi)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ padding: '4px 12px', borderRadius: 6, background: '#f5f3ff', border: '1px solid #ddd6fe', fontSize: 12, fontWeight: 700, color: '#7c3aed' }}>GD Đến</span>
+                  <span style={{ color: '#6b7280', fontSize: 13 }}>→</span>
+                  <span style={{ padding: '4px 12px', borderRadius: 6, background: '#dbeafe', border: '1px solid #93c5fd', fontSize: 12, fontWeight: 700, color: '#1e40af' }}>Core Ghi nợ</span>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>(Swift Đến / NAPAS Đến)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Group by pair */}
+            {groupByPair(logics).map(({ pairLabel, meta, items }) => (
+              <div key={pairLabel} style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: meta.color }}>{pairLabel}</span>
+                  <div style={{ flex: 1, height: 1, background: meta.border }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {items.map(item => (
+                    <LogicCard
+                      key={item.id}
+                      item={item}
+                      meta={meta}
+                      isAdmin={isAdmin}
+                      isViewer={isViewer}
+                      onEdit={() => openEdit(item)}
+                      onDelete={() => deleteItem(item)}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
-          </div>
+          </>
+        )
       }
 
-      <LogicFormModal
-        open={formOpen}
-        editing={editing}
-        onClose={() => setFormOpen(false)}
-        onSave={(data) => {
-          if (editing) setLogics(prev => prev.map(l => l.id === editing.id ? { ...l, ...data } : l))
-          else setLogics(prev => [...prev, { ...data, id: 'jl_' + Date.now(), lastRun: null, lastResult: null, status: 'idle' }])
-          setFormOpen(false)
-        }}
-      />
+      {isAdmin && (
+        <LogicFormModal
+          open={formOpen}
+          editing={editing}
+          onClose={() => setFormOpen(false)}
+          onSave={(data) => {
+            if (editing) {
+              setLogics(prev => prev.map(l => l.id === editing.id ? { ...l, ...data } : l))
+              toast('Đã lưu thay đổi.', 'success')
+            } else {
+              setLogics(prev => [...prev, { ...data, id: 'jl_' + Date.now(), lastRun: null, status: 'idle' }])
+              toast('Đã tạo rule so khớp mới.', 'success')
+            }
+            setFormOpen(false)
+          }}
+        />
+      )}
     </PageShell>
   )
 }
 
-function LogicCard({ item, onEdit, onDelete }) {
-  const [expanded, setExpanded]     = useState(false)
-  const [resultTab, setResultTab]   = useState('matched')
+function groupByPair(logics) {
+  const groups = {}
+  logics.forEach(item => {
+    const key  = pairKey(item)
+    const meta = pairMeta(item)
+    const label = `${item.leftSource} ↔ ${item.rightSource}`
+    if (!groups[key]) groups[key] = { pairLabel: label, meta, items: [] }
+    groups[key].items.push(item)
+  })
+  return Object.values(groups)
+}
+
+/* ── Logic Card ──────────────────────────────────────────────────────────────── */
+function LogicCard({ item, meta, isAdmin, isViewer, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false)
 
   const statusMap = {
-    success: <Badge variant="success" dot>Đã chạy</Badge>,
-    idle:    <Badge variant="neutral">Chưa chạy</Badge>,
-    running: <Badge variant="warning" dot>Đang chạy</Badge>,
+    success: <Badge variant="success" dot>Đã cấu hình</Badge>,
+    idle:    <Badge variant="neutral">Chưa kích hoạt</Badge>,
   }
 
-  const resultData = MOCK_RESULT[item.id]
-  const resultRows = resultData?.[resultTab] ?? []
-  const resultCols = RESULT_COLS[resultTab] ?? []
-
-  const RESULT_TABS = [
-    { key: 'matched',   label: 'Khớp',         count: item.lastResult?.matched,    color: C.success },
-    { key: 'onlyLeft',  label: 'Chỉ bên trái', count: item.lastResult?.onlyLeft,   color: C.warning },
-    { key: 'onlyRight', label: 'Chỉ bên phải', count: item.lastResult?.onlyRight,  color: C.error   },
-  ]
+  const dirColor = DIRECTION_COLOR[item.direction] ?? C.primary
+  const dirBg    = DIRECTION_BG[item.direction]    ?? C.neutralBg
 
   return (
     <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', cursor: 'pointer' }} onClick={() => setExpanded(e => !e)}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer' }} onClick={() => setExpanded(e => !e)}>
+
+        {/* Direction badge */}
+        <div style={{ flexShrink: 0, padding: '4px 12px', borderRadius: 20, background: dirBg, border: `1px solid ${dirColor}22`, fontSize: 12, fontWeight: 700, color: dirColor, minWidth: 52, textAlign: 'center' }}>
+          {item.direction}
+        </div>
+
         <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{item.name}</span>
-            {statusMap[item.status]}
-          </div>
-          <div style={{ fontSize: 12, color: C.textMuted, display: 'flex', gap: 16 }}>
-            <span><b style={{ color: C.primary }}>{item.leftTable}</b> → <b style={{ color: C.primary }}>{item.rightTable}</b></span>
-            <span>Ghép theo: {item.matchFields.map(f => f.left).join(', ')}</span>
-            {item.lastRun && <span>Chạy lần cuối: {item.lastRun}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {statusMap[item.status] ?? statusMap.idle}
+            <span style={{ fontSize: 12, color: C.textMuted }}>
+              Khớp theo: <b style={{ color: C.text }}>{item.matchFields.map(f => `${FIELD_LABEL[f.left] ?? f.left} = ${FIELD_LABEL[f.right] ?? f.right}`).join(' · ')}</b>
+            </span>
+            {item.lastRun && <span style={{ fontSize: 12, color: C.textLight }}>· {item.lastRun}</span>}
           </div>
         </div>
 
-        {item.lastResult && (
-          <div style={{ display: 'flex', gap: 16, fontSize: 13, marginRight: 8 }}>
-            <StatPill label="Khớp"         val={item.lastResult.matched}    color={C.success} />
-            <StatPill label="Chỉ bên trái" val={item.lastResult.onlyLeft}   color={C.warning} />
-            <StatPill label="Chỉ bên phải" val={item.lastResult.onlyRight}  color={C.error}   />
+        {isAdmin && (
+          <div style={{ display: 'flex', gap: 8 }} onClick={e => e.stopPropagation()}>
+            <Button size="sm" variant="ghost" onClick={onEdit}>Sửa</Button>
+            <Button size="sm" variant="ghost" onClick={onDelete} style={{ color: C.error }}>Xóa</Button>
           </div>
         )}
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="sm" variant="primary">Chạy</Button>
-          <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); onEdit() }}>Sửa</Button>
-          <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); onDelete() }} style={{ color: C.error }}>Xóa</Button>
-        </div>
-        <span style={{ color: C.textLight, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
+        <span style={{ color: C.textLight, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }}>›</span>
       </div>
 
       {expanded && (
-        <div style={{ borderTop: `1px solid ${C.cardBorder}` }}>
-          {/* Config detail */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, padding: '16px 20px', background: C.neutralBg, fontSize: 13 }}>
-            <DetailItem label="Loại join"       val={JOIN_TYPES.find(j => j.value === item.joinType)?.label} />
-            <DetailItem label="Offset ngày"     val={DATE_OFFSETS.find(d => d.value === item.dateOffset)?.label} />
-            <DetailItem label="Nhóm theo"       val={item.groupBy} />
-            <DetailItem label="Bảng kết quả"    val={<span style={{ fontFamily: 'monospace', color: C.primary }}>{item.resultTable}</span>} />
-            <DetailItem label="Chiều giao dịch" val={item.direction === 'forward' ? 'Đi (Forward)' : 'Đến (Backward)'} />
-            <DetailItem label="Trường ghép"     val={item.matchFields.map(f => `${f.left} = ${f.right}`).join(' & ')} />
-          </div>
-
-          {/* Inline result table – only when logic has been run */}
-          {resultData && (
-            <div style={{ borderTop: `1px solid ${C.cardBorder}` }}>
-              {/* Result tab bar */}
-              <div style={{ display: 'flex', gap: 0, background: '#fff', borderBottom: `1px solid ${C.cardBorder}` }}>
-                {RESULT_TABS.map(t => {
-                  const active = t.key === resultTab
-                  return (
-                    <button
-                      key={t.key}
-                      onClick={() => setResultTab(t.key)}
-                      style={{
-                        padding: '10px 20px', border: 'none', cursor: 'pointer',
-                        background: active ? '#fff' : C.neutralBg,
-                        borderBottom: active ? `2px solid ${t.color}` : '2px solid transparent',
-                        fontSize: 12, fontWeight: active ? 700 : 500,
-                        color: active ? t.color : C.textMuted,
-                        transition: 'all 0.12s',
-                      }}
-                    >
-                      {t.label}
-                      {t.count != null && (
-                        <span style={{
-                          marginLeft: 6,
-                          padding: '1px 7px', borderRadius: 10,
-                          fontSize: 11, fontWeight: 700,
-                          background: active ? t.color : C.cardBorder,
-                          color: active ? '#fff' : C.textMuted,
-                        }}>
-                          {t.count.toLocaleString()}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-                <div style={{ flex: 1 }} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px' }}>
-                  <Button size="sm" variant="ghost" style={{ fontSize: 11 }}>Xuất CSV</Button>
-                </div>
+        <div style={{ borderTop: `1px solid ${C.cardBorder}`, padding: '14px 20px', background: C.neutralBg, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
+          <DetailItem label="Nguồn trái"  val={<b style={{ color: meta.color }}>{item.leftSource}</b>} />
+          <DetailItem label="Nguồn phải"  val={<b style={{ color: meta.color }}>{item.rightSource}</b>} />
+          <DetailItem label="Kiểu join"   val={JOIN_TYPES.find(j => j.value === item.joinType)?.label ?? item.joinType} />
+          <DetailItem
+            label="Trường so khớp"
+            val={
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
+                {item.matchFields.map((f, i) => (
+                  <span key={i} style={{ fontFamily: 'monospace', fontSize: 12, background: '#f1f5f9', padding: '3px 8px', borderRadius: 4, display: 'inline-block' }}>
+                    {FIELD_LABEL[f.left] ?? f.left} = {FIELD_LABEL[f.right] ?? f.right}
+                  </span>
+                ))}
               </div>
-
-              {/* Result rows */}
-              <div style={{ overflowX: 'auto', maxHeight: 280, overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                    <tr>
-                      {resultCols.map(c => (
-                        <th key={c} style={{ padding: '8px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: C.textMuted, background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}`, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
-                          {c.replace(/_/g, ' ')}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resultRows.map((row, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff' }}>
-                        {resultCols.map(c => (
-                          <td key={c} style={{ padding: '8px 14px', whiteSpace: 'nowrap' }}>
-                            {c === 'match' ? <Badge variant="success">Khớp</Badge>
-                              : c === 'status' ? (
-                                row[c] === 'TIMEOUT' ? <Badge variant="warning" dot>Timeout</Badge>
-                                : row[c] === 'THAT BAI' ? <Badge variant="error" dot>Thất bại</Badge>
-                                : <span style={{ color: C.textMuted }}>{row[c]}</span>
-                              )
-                              : c.includes('amount') ? <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{Number(row[c]).toLocaleString('vi-VN')} ₫</span>
-                              : c === 'ly_do' ? <span style={{ color: resultTab === 'matched' ? C.text : C.error, fontSize: 11 }}>{row[c]}</span>
-                              : <span style={{ fontFamily: 'monospace', fontSize: 11, color: C.text }}>{row[c]}</span>}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div style={{ padding: '8px 14px', fontSize: 11, color: C.textMuted, borderTop: `1px solid ${C.cardBorder}` }}>
-                Hiển thị {resultRows.length} dòng mẫu · Bảng đầy đủ: <span style={{ fontFamily: 'monospace', color: C.primary }}>{item.resultTable}</span>
-              </div>
-            </div>
-          )}
+            }
+          />
+          <DetailItem label="Chiều GD"    val={<span style={{ color: dirColor, fontWeight: 700 }}>{item.direction}</span>} />
+          {item.lastRun && <DetailItem label="Chạy lần cuối" val={item.lastRun} />}
         </div>
       )}
     </div>
   )
 }
 
-function StatPill({ label, val, color }) {
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color }}>{val?.toLocaleString()}</div>
-      <div style={{ fontSize: 10, color: C.textMuted }}>{label}</div>
-    </div>
-  )
-}
-
-function DetailItem({ label, val }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
-      <div style={{ fontSize: 13, color: C.text }}>{val}</div>
-    </div>
-  )
-}
-
+/* ── Form Modal ──────────────────────────────────────────────────────────────── */
 function LogicFormModal({ open, editing, onClose, onSave }) {
-  const [form, setForm] = useState(editing ?? {
-    name: '', leftTable: 'swift_di', rightTable: 'napas_di',
-    direction: 'forward', joinType: 'left',
+  const blank = {
+    name: '', leftSource: 'Swift', rightSource: 'NAPAS',
+    direction: 'Đi', joinType: 'left',
     matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
-    dateOffset: 'T_to_T1', groupBy: 'date_status', resultTable: '',
-  })
-
+  }
+  const [form, setForm] = useState(() => editing ?? blank)
+  useState(() => { if (open) setForm(editing ?? blank) })
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
+  const autoName = `${form.leftSource} vs ${form.rightSource}`
+
   return (
-    <Modal open={open} title={editing ? 'Sửa logic đối soát' : 'Tạo logic đối soát mới'} onClose={onClose} onConfirm={() => onSave(form)} width={600}>
-      <FormRow label="Tên logic">
-        <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="VD: Swift Đi vs Napas Đi" />
+    <Modal open={open} title={editing ? 'Sửa rule so khớp' : 'Tạo rule so khớp mới'} onClose={onClose} onConfirm={() => onSave({ ...form, name: form.name || autoName })} width={580}>
+      <FormRow label="Tên rule" hint="Để trống sẽ tự động đặt tên">
+        <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder={autoName} />
       </FormRow>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <FormRow label="Bảng trái (nguồn)">
-          <Select value={form.leftTable} onChange={e => set('leftTable', e.target.value)}>
-            {TABLES.map(t => <option key={t} value={t}>{t}</option>)}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 10, alignItems: 'end' }}>
+        <FormRow label="Nguồn trái">
+          <Select value={form.leftSource} onChange={e => set('leftSource', e.target.value)}>
+            {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
           </Select>
         </FormRow>
-        <FormRow label="Bảng phải (đích)">
-          <Select value={form.rightTable} onChange={e => set('rightTable', e.target.value)}>
-            {TABLES.map(t => <option key={t} value={t}>{t}</option>)}
+        <div style={{ paddingBottom: 8, color: C.textMuted, fontWeight: 700, fontSize: 16 }}>↔</div>
+        <FormRow label="Nguồn phải">
+          <Select value={form.rightSource} onChange={e => set('rightSource', e.target.value)}>
+            {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </FormRow>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <FormRow label="Chiều GD">
+          <Select value={form.direction} onChange={e => set('direction', e.target.value)}>
+            {DIRECTION_OPTIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
           </Select>
         </FormRow>
         <FormRow label="Kiểu join">
@@ -340,26 +315,42 @@ function LogicFormModal({ open, editing, onClose, onSave }) {
             {JOIN_TYPES.map(j => <option key={j.value} value={j.value}>{j.label}</option>)}
           </Select>
         </FormRow>
-        <FormRow label="Offset ngày">
-          <Select value={form.dateOffset} onChange={e => set('dateOffset', e.target.value)}>
-            {DATE_OFFSETS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-          </Select>
-        </FormRow>
       </div>
-      <FormRow label="Trường ghép (left = right)" hint="Các cặp trường dùng để so khớp giữa 2 bảng">
+
+      <FormRow label="Trường so khớp (trái = phải)" hint="Các cặp trường dùng để ghép giữa 2 nguồn">
         {form.matchFields.map((mf, i) => (
           <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            <Input value={mf.left}  onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, left: e.target.value} : f))} placeholder="Trường bảng trái" />
-            <span style={{ color: C.textMuted, flexShrink: 0 }}>=</span>
-            <Input value={mf.right} onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, right: e.target.value} : f))} placeholder="Trường bảng phải" />
+            <Input
+              value={mf.left}
+              onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, left: e.target.value} : f))}
+              placeholder={`Trường ${form.leftSource}`}
+            />
+            <span style={{ color: C.textMuted, flexShrink: 0, fontWeight: 700 }}>=</span>
+            <Input
+              value={mf.right}
+              onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, right: e.target.value} : f))}
+              placeholder={`Trường ${form.rightSource}`}
+            />
             <button onClick={() => set('matchFields', form.matchFields.filter((_,j) => j!==i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 18 }}>×</button>
           </div>
         ))}
         <button onClick={() => set('matchFields', [...form.matchFields, { left: '', right: '' }])} style={{ background: 'none', border: `1px dashed ${C.primary}`, cursor: 'pointer', color: C.primary, borderRadius: 6, padding: '4px 12px', fontSize: 12 }}>+ Thêm cặp trường</button>
       </FormRow>
-      <FormRow label="Tên bảng kết quả" hint="Dữ liệu sau khi ghép sẽ được lưu vào bảng này">
-        <Input value={form.resultTable} onChange={e => set('resultTable', e.target.value)} placeholder="VD: result_di_vs_napas" />
-      </FormRow>
+
+      {/* Preview */}
+      <div style={{ marginTop: 4, padding: '10px 14px', background: C.neutralBg, borderRadius: radius.md, fontSize: 12, color: C.textMuted }}>
+        Backend sẽ map: <b style={{ color: C.text }}>{form.leftSource}</b> {form.direction !== 'Cả hai' && `(${form.direction})`} ↔ <b style={{ color: C.text }}>{form.rightSource}</b> {form.direction !== 'Cả hai' && `(${form.direction})`}
+      </div>
     </Modal>
   )
 }
+
+function DetailItem({ label, val }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: C.text }}>{val}</div>
+    </div>
+  )
+}
+

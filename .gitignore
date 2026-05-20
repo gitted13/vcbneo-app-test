@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env (chứa secret — không commit)
+.env
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Runtime — uploads do người dùng tải lên
+backend/uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / tooling
+.claude/

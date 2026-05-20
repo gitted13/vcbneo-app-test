@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.modules.reconciliation.service import get_results
+from app.modules.reconciliation.rows_builder import get_rows, clear_rows_cache
 
 router = APIRouter()
 
@@ -28,6 +29,27 @@ def run_reconciliation(req: RunRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": str(e), "trace": traceback.format_exc()},
         )
+
+
+@router.get("/rows")
+def get_transaction_rows(
+    year: int = Query(default=datetime.date.today().year),
+    date_labels: list[str] = Query(default=[]),
+):
+    try:
+        rows = get_rows(year=year, date_labels=date_labels if date_labels else None)
+        return {"success": True, "rows": rows, "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": str(e), "trace": traceback.format_exc()},
+        )
+
+
+@router.post("/rows/cache/clear")
+def clear_rows():
+    clear_rows_cache()
+    return {"success": True}
 
 
 @router.get("/results")

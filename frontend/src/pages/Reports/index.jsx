@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
 import Card from '../../components/Card'
 import Badge from '../../components/Badge'
@@ -6,81 +6,115 @@ import Button from '../../components/Button'
 import Modal from '../../components/Modal'
 import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
+import { useApp } from '../../context/AppContext'
 import { C, radius, shadow } from '../../theme'
+import { RESOLUTION_OF } from '../../data/reconcile'
+import { api } from '../../api/client'
 
-/* ── Mock data ──────────────────────────────────────────────────────────────── */
+/* ── Mock data (3 ngày 01–03/02/2026, khớp với trang Đối soát) ─────────────── */
 const KPI = [
-  { label: 'Tổng GD Swift Đi',  val: '8,381',  sub: 'hôm nay',  delta: '+2.3%', up: true,  color: '#2563eb', bg: 'linear-gradient(135deg,#eff6ff,#dbeafe)', border: '#bfdbfe', icon: '→' },
-  { label: 'Tổng GD Swift Đến', val: '6,104',  sub: 'hôm nay',  delta: '+1.1%', up: true,  color: '#7c3aed', bg: 'linear-gradient(135deg,#f5f3ff,#ede9fe)', border: '#c4b5fd', icon: '←' },
-  { label: 'Khớp NAPAS Đi',     val: '2,664',  sub: '/ 2,722',  delta: '97.9%', up: true,  color: '#059669', bg: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '#bbf7d0', icon: '✓' },
-  { label: 'Lệch / Chưa khớp',  val: '58',     sub: 'cần xử lý', delta: '−14',  up: false, color: '#dc2626', bg: 'linear-gradient(135deg,#fef2f2,#fee2e2)', border: '#fecaca', icon: '!' },
+  { label: 'Tổng GD Swift Đi',  val: '5,029', sub: '3 ngày', delta: '+1.2%', up: true,  color: '#2563eb', bg: 'linear-gradient(135deg,#eff6ff,#dbeafe)', border: '#bfdbfe', icon: '→' },
+  { label: 'Tổng GD Swift Đến', val: '3,664', sub: '3 ngày', delta: '+0.9%', up: true,  color: '#7c3aed', bg: 'linear-gradient(135deg,#f5f3ff,#ede9fe)', border: '#c4b5fd', icon: '←' },
+  { label: 'Khớp tự động',      val: '8,013', sub: '/ 8,693', delta: '92.2%', up: true, color: '#059669', bg: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '#bbf7d0', icon: '✓' },
+  { label: 'Cần xử lý',         val: '680',   sub: 'chờ duyệt', delta: '7.8%', up: false, color: '#dc2626', bg: 'linear-gradient(135deg,#fef2f2,#fee2e2)', border: '#fecaca', icon: '!' },
 ]
 
 const DAILY_SWIFT = [
-  { date: '01/02', di: 8200, den: 5900 },
-  { date: '02/02', di: 8050, den: 6200 },
-  { date: '03/02', di: 7800, den: 5800 },
-  { date: '04/02', di: 8150, den: 6050 },
-  { date: '05/02', di: 8381, den: 6104 },
+  { date: '01/02', di: 1650, den: 1200 },
+  { date: '02/02', di: 1688, den: 1246 },
+  { date: '03/02', di: 1691, den: 1218 },
 ]
 
+// Phân tích trạng thái đối soát cho chiều Đi (5,029 GD)
 const STATUS_BREAKDOWN = [
-  { label: 'Thành công',  count: 2664, pct: 97.9, color: '#059669', bg: '#dcfce7' },
-  { label: 'Timeout',     count: 24,   pct: 0.9,  color: '#d97706', bg: '#fef3c7' },
-  { label: 'Thất bại',    count: 10,   pct: 0.4,  color: '#dc2626', bg: '#fee2e2' },
-  { label: 'Chỉ Napas',   count: 34,   pct: 1.2,  color: '#7c3aed', bg: '#ede9fe' },
+  { label: 'Khớp đúng ngày',      count: 4274, pct: 85.0, color: '#059669', bg: '#dcfce7' },
+  { label: 'Khớp lệch ngày',      count:  402, pct:  8.0, color: '#0891b2', bg: '#cffafe' },
+  { label: 'NAPAS thất bại',       count:  101, pct:  2.0, color: '#dc2626', bg: '#fee2e2' },
+  { label: 'Timeout – có Core',    count:  101, pct:  2.0, color: '#d97706', bg: '#fef3c7' },
+  { label: 'Cần xử lý thủ công',   count:  151, pct:  3.0, color: '#7c3aed', bg: '#ede9fe' },
 ]
 
 const INITIAL_REPORTS = [
   {
     id: 'rpt_001',
-    name: 'Bảng tổng hợp ĐI – Đối chiếu Napas',
-    sourceLogic: 'jl_001', sourceName: 'Swift Đi vs Napas Đi',
-    lastGenerated: '2026-02-05 09:05', format: 'Excel (.xls)',
-    sections: ['Tiêu đề ngân hàng', 'Swift count/amount', 'Core ngày T', 'Core ngày T+1', 'GL ngày T', 'Napas ngày T'],
+    name: 'Bảng tổng hợp ĐI – Đối chiếu NAPAS',
+    sourceLogic: 'jl_001', sourceName: 'Swift Đi ↔ NAPAS Đi',
+    lastGenerated: '2026-02-03 09:05', format: 'Excel (.xls)',
+    sections: ['Tiêu đề ngân hàng', 'Swift count / amount', 'Core Ghi có ngày T', 'Core Ghi có ngày T+1', 'NAPAS Đi TC ngày T', 'Chênh lệch / GD lỗi'],
     status: 'ready',
   },
   {
     id: 'rpt_002',
-    name: 'Bảng tổng hợp ĐẾN – Đối chiếu Napas',
-    sourceLogic: 'jl_002', sourceName: 'Swift Đến vs Napas Đến',
-    lastGenerated: '2026-02-05 09:06', format: 'Excel (.xls)',
-    sections: ['Tiêu đề ngân hàng', 'Swift count/amount', 'Core ngày T', 'GL ngày T', 'Napas ngày T', 'Giao dịch Timeout'],
+    name: 'Bảng tổng hợp ĐẾN – Đối chiếu NAPAS',
+    sourceLogic: 'jl_002', sourceName: 'Swift Đến ↔ NAPAS Đến',
+    lastGenerated: '2026-02-03 09:06', format: 'Excel (.xls)',
+    sections: ['Tiêu đề ngân hàng', 'Swift count / amount', 'Core Ghi nợ ngày T', 'NAPAS Đến TC ngày T', 'GD Timeout / Ngoại lệ'],
     status: 'ready',
   },
   {
     id: 'rpt_003',
-    name: 'Danh sách ĐI lỗi – Hoàn trả',
-    sourceLogic: 'jl_001', sourceName: 'Swift Đi vs Napas Đi',
+    name: 'Danh sách ĐI lỗi – NAPAS thất bại',
+    sourceLogic: 'jl_001', sourceName: 'Swift Đi ↔ NAPAS Đi',
+    lastGenerated: '2026-02-03 09:08', format: 'Excel (.xls)',
+    sections: ['Ngày phát sinh', 'Trace', 'Số tiền', 'Trạng thái Swift', 'Lý do NAPAS từ chối', 'Hướng xử lý'],
+    status: 'ready',
+  },
+  {
+    id: 'rpt_004',
+    name: 'Danh sách cần xử lý thủ công',
+    sourceLogic: 'jl_001', sourceName: 'Swift Đi ↔ NAPAS Đi',
     lastGenerated: null, format: 'Excel (.xls)',
-    sections: ['Ngày phát sinh', 'Trace', 'Tài khoản', 'Số tiền', 'Trạng thái Swift', 'Kết quả Napas'],
+    sections: ['Ngày phát sinh', 'Trace', 'Số tiền', 'Trạng thái đối soát', 'Hướng xử lý', 'Người phụ trách'],
     status: 'idle',
   },
 ]
 
 const LOGICS = [
-  { id: 'jl_001', name: 'Swift Đi vs Napas Đi' },
-  { id: 'jl_002', name: 'Swift Đến vs Napas Đến' },
-  { id: 'jl_003', name: 'Swift Đi vs Core (Ghi có)' },
+  { id: 'jl_001', name: 'Swift Đi ↔ NAPAS Đi' },
+  { id: 'jl_002', name: 'Swift Đến ↔ NAPAS Đến' },
+  { id: 'jl_003', name: 'Swift Đi ↔ Core (Ghi có)' },
+  { id: 'jl_004', name: 'Swift Đến ↔ Core (Ghi nợ)' },
+  { id: 'jl_005', name: 'Core ↔ NAPAS Đi (cross-check)' },
+  { id: 'jl_006', name: 'Core ↔ NAPAS Đến (cross-check)' },
 ]
 
-/* ── helpers ────────────────────────────────────────────────────────────────── */
 const maxBar = Math.max(...DAILY_SWIFT.map(d => Math.max(d.di, d.den)))
 
 export default function Reports() {
+  const { showConfirm, toast } = useApp()
   const [reports, setReports] = useState(INITIAL_REPORTS)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
-  const [activeDate, setActiveDate] = useState('05/02')
+  const [activeDate, setActiveDate] = useState('03/02')
+  const [liveRows, setLiveRows] = useState([])
+
+  useEffect(() => {
+    api.getRows().then(res => setLiveRows(res.rows ?? [])).catch(() => {})
+  }, [])
+
+  const chiSwift   = liveRows.filter(r => r.recon_status === 'CHI_SWIFT')
+  const chiNapas   = liveRows.filter(r => r.recon_status === 'CHI_NAPAS')
+  const chiCore    = liveRows.filter(r => r.recon_status === 'CHI_CORE')
+  const needsAct   = liveRows.filter(r => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by)
+  const totalAlert = chiSwift.length + chiNapas.length + chiCore.length
 
   const openCreate = () => { setEditing(null); setFormOpen(true) }
   const openEdit   = (r)  => { setEditing(r);  setFormOpen(true) }
-  const deleteItem = (id) => setReports(p => p.filter(r => r.id !== id))
+  const deleteItem = (id, name) => showConfirm({
+    title: 'Xóa báo cáo',
+    message: `Xóa "${name}" sẽ không thể khôi phục.`,
+    variant: 'danger',
+    confirmLabel: 'Xóa',
+    onConfirm: () => {
+      setReports(p => p.filter(r => r.id !== id))
+      toast(`Đã xóa báo cáo "${name}".`, 'success')
+    },
+  })
 
   return (
     <PageShell
-      title="Báo cáo"
-      subtitle="Tổng quan kết quả đối soát ngày 05/02/2026 · Ngân hàng TM TNHH MTV Xây dựng Việt Nam"
+      title="Dashboard"
+      subtitle="Tổng quan kết quả đối soát · Ngân hàng TM TNHH MTV Xây dựng Việt Nam"
       actions={<Button onClick={openCreate}>+ Tạo báo cáo mới</Button>}
     >
       {/* ── KPI row ── */}
@@ -100,14 +134,60 @@ export default function Reports() {
         ))}
       </div>
 
+      {/* ── Alerts row ── */}
+      {(totalAlert > 0 || needsAct.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 20 }}>
+          {chiSwift.length > 0 && (
+            <div style={{ padding: '14px 18px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#dc2626', lineHeight: 1 }}>{chiSwift.length}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9b1c1c', marginTop: 3 }}>Chỉ Swift — không khớp Core/NAPAS</div>
+                <div style={{ fontSize: 10, color: '#9b1c1c', marginTop: 1 }}>Kiểm tra thủ công, liên hệ Core team</div>
+              </div>
+            </div>
+          )}
+          {chiNapas.length > 0 && (
+            <div style={{ padding: '14px 18px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#dc2626', lineHeight: 1 }}>{chiNapas.length}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9b1c1c', marginTop: 3 }}>Chỉ NAPAS — không khớp Swift/Core</div>
+                <div style={{ fontSize: 10, color: '#9b1c1c', marginTop: 1 }}>Liên hệ NAPAS tra cứu giao dịch</div>
+              </div>
+            </div>
+          )}
+          {chiCore.length > 0 && (
+            <div style={{ padding: '14px 18px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 16, fontWeight: 800, flexShrink: 0 }}>!</div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#7c3aed', lineHeight: 1 }}>{chiCore.length}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#4c1d95', marginTop: 3 }}>Chỉ Core — không khớp Swift/NAPAS</div>
+                <div style={{ fontSize: 10, color: '#4c1d95', marginTop: 1 }}>Có thể là batch NP_TREO — kiểm tra</div>
+              </div>
+            </div>
+          )}
+          {needsAct.length > 0 && (
+            <div style={{ padding: '14px 18px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.lg, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 14, fontWeight: 800, flexShrink: 0 }}>i</div>
+              <div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#d97706', lineHeight: 1 }}>{needsAct.length}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', marginTop: 3 }}>Cần xử lý thủ công</div>
+                <div style={{ fontSize: 10, color: '#92400e', marginTop: 1 }}>Chưa được xác nhận — Operator review</div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Charts row ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 14, marginBottom: 20 }}>
         {/* Bar chart – daily volume */}
         <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, padding: '20px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Lượng giao dịch 5 ngày gần nhất</div>
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Swift Đi vs Swift Đến</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Lượng giao dịch 3 ngày gần nhất</div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>Swift Đi vs Swift Đến · 01–03/02/2026</div>
             </div>
             <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />Swift Đi</span>
@@ -121,15 +201,11 @@ export default function Reports() {
                   <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', justifyContent: 'center' }}>
                     <div style={{
                       width: 18, borderRadius: '3px 3px 0 0', background: d.date === activeDate ? '#1d4ed8' : '#93c5fd',
-                      height: `${(d.di / maxBar) * 110}px`,
-                      transition: 'height 0.3s',
-                      cursor: 'pointer',
+                      height: `${(d.di / maxBar) * 110}px`, transition: 'height 0.3s', cursor: 'pointer',
                     }} onClick={() => setActiveDate(d.date)} title={`Swift Đi: ${d.di.toLocaleString()}`} />
                     <div style={{
                       width: 18, borderRadius: '3px 3px 0 0', background: d.date === activeDate ? '#7c3aed' : '#c4b5fd',
-                      height: `${(d.den / maxBar) * 110}px`,
-                      transition: 'height 0.3s',
-                      cursor: 'pointer',
+                      height: `${(d.den / maxBar) * 110}px`, transition: 'height 0.3s', cursor: 'pointer',
                     }} onClick={() => setActiveDate(d.date)} title={`Swift Đến: ${d.den.toLocaleString()}`} />
                   </div>
                 </div>
@@ -138,8 +214,9 @@ export default function Reports() {
             ))}
           </div>
           <div style={{ marginTop: 10, padding: '10px 14px', background: C.neutralBg, borderRadius: radius.md, fontSize: 12 }}>
-            {DAILY_SWIFT.find(d => d.date === activeDate) && (() => {
+            {(() => {
               const d = DAILY_SWIFT.find(x => x.date === activeDate)
+              if (!d) return null
               return (
                 <div style={{ display: 'flex', gap: 20 }}>
                   <span><b style={{ color: '#2563eb' }}>{d.di.toLocaleString()}</b> <span style={{ color: C.textMuted }}>Swift Đi</span></span>
@@ -151,19 +228,15 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* Donut-style status breakdown */}
+        {/* Stacked bar – status breakdown */}
         <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, padding: '20px 24px' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Trạng thái đối soát Đi</div>
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 16 }}>Swift Đi vs Napas Đi · 2,732 GD</div>
-
-          {/* Stacked bar */}
+          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 16 }}>Swift Đi ↔ NAPAS Đi · 5,029 GD · 3 ngày</div>
           <div style={{ display: 'flex', height: 18, borderRadius: 9, overflow: 'hidden', marginBottom: 16 }}>
             {STATUS_BREAKDOWN.map(s => (
               <div key={s.label} style={{ width: `${s.pct}%`, background: s.color, transition: 'width 0.4s', minWidth: s.pct > 0.5 ? 4 : 0 }} title={`${s.label}: ${s.pct}%`} />
             ))}
           </div>
-
-          {/* Legend rows */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {STATUS_BREAKDOWN.map(s => (
               <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -180,22 +253,22 @@ export default function Reports() {
       {/* ── Napas match summary table ── */}
       <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden', marginBottom: 20 }}>
         <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.cardBorder}`, background: 'linear-gradient(135deg,#f8fafc,#f1f5f9)' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Tổng hợp đối soát – 05/02/2026</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Tổng hợp đối soát</div>
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>So sánh giữa Swift, Core và NAPAS</div>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                {['Luồng', 'Swift count', 'Swift amount', 'Core GD T', 'Core GD T+1', 'Napas count', 'Napas amount', 'Chênh lệch', ''].map(h => (
+                {['Luồng', 'Swift count', 'Swift amount', 'Core ngày T', 'Core ngày T+1', 'NAPAS count', 'NAPAS amount', 'Chênh lệch', ''].map(h => (
                   <th key={h} style={{ padding: '9px 14px', textAlign: h === 'Chênh lệch' || h === '' ? 'center' : 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}`, textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {[
-                { flow: 'Swift Đi',  color: '#2563eb', sc: 8381, sa: '42.1 tỷ', ct: 8200, ct1: 181, nc: 8347, na: '41.9 tỷ', diff: 34, ok: false },
-                { flow: 'Swift Đến', color: '#7c3aed', sc: 6104, sa: '28.6 tỷ', ct: 6104, ct1: 0,   nc: 6073, na: '28.5 tỷ', diff: 31, ok: false },
+                { flow: 'Swift Đi',  color: '#2563eb', sc: 5029, sa: '24.7 tỷ', ct: 4826, ct1: 203, nc: 4928, na: '24.4 tỷ', diff: 101 },
+                { flow: 'Swift Đến', color: '#7c3aed', sc: 3664, sa: '18.3 tỷ', ct: 3664, ct1: 0,   nc: 3630, na: '18.1 tỷ', diff:  34 },
               ].map((r, i) => (
                 <tr key={r.flow} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff' }}>
                   <td style={{ padding: '10px 14px' }}>
@@ -229,7 +302,7 @@ export default function Reports() {
         {reports.length === 0
           ? <EmptyState icon="📊" title="Chưa có báo cáo nào" description="Tạo báo cáo đầu tiên từ kết quả đối soát." action="+ Tạo báo cáo" onAction={openCreate} />
           : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {reports.map(r => <ReportCard key={r.id} r={r} onEdit={() => openEdit(r)} onDelete={() => deleteItem(r.id)} />)}
+              {reports.map(r => <ReportCard key={r.id} r={r} onEdit={() => openEdit(r)} onDelete={() => deleteItem(r.id, r.name)} />)}
             </div>
         }
       </div>
@@ -239,8 +312,13 @@ export default function Reports() {
         editing={editing}
         onClose={() => setFormOpen(false)}
         onSave={(data) => {
-          if (editing) setReports(p => p.map(r => r.id === editing.id ? { ...r, ...data } : r))
-          else setReports(p => [...p, { ...data, id: 'rpt_' + Date.now(), lastGenerated: null, status: 'idle' }])
+          if (editing) {
+            setReports(p => p.map(r => r.id === editing.id ? { ...r, ...data } : r))
+            toast(`Đã cập nhật báo cáo "${data.name}".`, 'success')
+          } else {
+            setReports(p => [...p, { ...data, id: 'rpt_' + Date.now(), lastGenerated: null, status: 'idle' }])
+            toast(`Đã tạo báo cáo "${data.name}".`, 'success')
+          }
           setFormOpen(false)
         }}
       />
@@ -249,7 +327,17 @@ export default function Reports() {
 }
 
 function ReportCard({ r, onEdit, onDelete }) {
+  const { toast } = useApp()
   const [expanded, setExpanded] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    setExporting(true)
+    await new Promise(res => setTimeout(res, 1600))
+    setExporting(false)
+    toast(`Đã xuất "${r.name}" thành công.`, 'success')
+  }
+
   const statusBadge = r.status === 'ready'
     ? <Badge variant="success" dot>Sẵn sàng</Badge>
     : <Badge variant="neutral">Chưa tạo</Badge>
@@ -269,7 +357,17 @@ function ReportCard({ r, onEdit, onDelete }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="sm" variant="primary" style={{ background: '#059669', borderColor: '#059669' }}>Xuất Excel</Button>
+          <Button
+            size="sm" variant="primary"
+            style={{ background: exporting ? '#34d399' : '#059669', borderColor: '#059669' }}
+            disabled={exporting}
+            onClick={handleExport}
+          >
+            {exporting
+              ? <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Spinner />Đang xuất...</span>
+              : 'Xuất Excel'
+            }
+          </Button>
           <Button size="sm" variant="ghost">Xem trước</Button>
           <Button size="sm" variant="ghost" onClick={onEdit}>Sửa</Button>
           <Button size="sm" variant="ghost" onClick={onDelete} style={{ color: C.error }}>Xóa</Button>
@@ -294,13 +392,17 @@ function ReportCard({ r, onEdit, onDelete }) {
   )
 }
 
+const DEFAULT_FORM = { name: '', sourceLogic: 'jl_001', sourceName: 'Swift Đi vs Napas Đi', format: 'Excel (.xls)', sections: [] }
+
 function ReportFormModal({ open, editing, onClose, onSave }) {
-  const [form, setForm] = useState(editing ?? {
-    name: '', sourceLogic: 'jl_001', sourceName: 'Swift Đi vs Napas Đi',
-    format: 'Excel (.xls)', sections: [],
-  })
+  const [form, setForm] = useState(DEFAULT_FORM)
   const [newSection, setNewSection] = useState('')
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  useEffect(() => {
+    setForm(editing ?? DEFAULT_FORM)
+    setNewSection('')
+  }, [editing, open])
 
   const addSection = () => {
     if (!newSection.trim()) return
@@ -333,7 +435,7 @@ function ReportFormModal({ open, editing, onClose, onSave }) {
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: C.neutralBg, borderRadius: 6, border: `1px solid ${C.cardBorder}`, fontSize: 13 }}>
               <span style={{ color: C.primary, fontSize: 12, minWidth: 20, fontWeight: 700 }}>{i + 1}.</span>
               <span style={{ flex: 1 }}>{s}</span>
-              <button onClick={() => set('sections', form.sections.filter((_,j) => j!==i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 16 }}>×</button>
+              <button onClick={() => set('sections', form.sections.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 16 }}>×</button>
             </div>
           ))}
         </div>
@@ -343,5 +445,17 @@ function ReportFormModal({ open, editing, onClose, onSave }) {
         </div>
       </FormRow>
     </Modal>
+  )
+}
+
+function Spinner() {
+  return (
+    <span style={{
+      display: 'inline-block', width: 11, height: 11,
+      border: '2px solid rgba(255,255,255,0.4)',
+      borderTopColor: '#fff',
+      borderRadius: '50%',
+      animation: 'spin 0.7s linear infinite',
+    }} />
   )
 }

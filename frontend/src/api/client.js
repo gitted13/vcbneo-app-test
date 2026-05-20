@@ -28,6 +28,19 @@ export const api = {
       body: JSON.stringify({ date_labels: dateLabels, year }),
     }),
 
+  getRows: (dateLabels = [], year = new Date().getFullYear()) => {
+    const params = new URLSearchParams({ year })
+    dateLabels.forEach(d => params.append('date_labels', d))
+    return request(`/reconcile/rows?${params}`)
+  },
+
+  patchRow: (id, patch) =>
+    request(`/reconcile/rows/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+
   exportExcel: (dateLabels, year) => {
     const params = new URLSearchParams({ year })
     dateLabels.forEach(d => params.append('date_labels', d))

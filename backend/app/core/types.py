@@ -2,11 +2,12 @@ from dataclasses import dataclass
 
 
 FILE_SLOTS: dict[str, str] = {
-    "swift_di":  "Swift report đi.xlsx",
-    "swift_den": "Swift report đến.xlsx",
-    "core":      "Core.xlsx",
-    "napas_di":  "Napas đi.xlsx",
-    "napas_den": "Napas đến.xlsx",
+    "swift_di":      "Swift report đi.xlsx",
+    "swift_den":     "Swift report đến.xlsx",
+    "core":          "Core.xlsx",
+    "napas_di":      "Napas đi.xlsx",
+    "napas_den":     "Napas đến.xlsx",
+    "napas_di_fail": "Napas đi KTC.xlsx",
 }
 
 

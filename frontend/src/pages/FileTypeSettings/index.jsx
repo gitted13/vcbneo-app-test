@@ -3,7 +3,6 @@ import PageShell from '../../components/PageShell'
 import Button from '../../components/Button'
 import Badge from '../../components/Badge'
 import Modal from '../../components/Modal'
-import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
 import { C, radius, shadow } from '../../theme'
 
@@ -13,63 +12,67 @@ const TYPE_COLORS = {
   napas_di: '#d97706', napas_den: '#dc2626', napas_di_fail: '#64748b',
 }
 
-const STORAGE_TABLES = ['Swift', 'Core', 'NAPAS']
-
 const DEFAULT_FILE_TYPES = [
   {
     id: 'swift_di', name: 'Swift Report Đi', storageTable: 'Swift',
     description: 'Báo cáo giao dịch chuyển tiền đi qua Swift',
+    acceptedExtensions: ['.xlsx', '.xls'],
     fields: [
-      { key: 'seq',      label: 'SEQ',           alias: 'seq',      type: 'integer', required: true,  allowedValues: [],                              storageCol: 'seq'      },
-      { key: 'trace',    label: 'TRACE NUMBER',   alias: 'trace',    type: 'integer', required: true,  allowedValues: [],                              storageCol: 'trace'    },
-      { key: 'hostdate', label: 'HOSTDATE',       alias: 'hostdate', type: 'date',    required: true,  allowedValues: [],                              storageCol: 'hostdate' },
-      { key: 'amount',   label: 'SỐ TIỀN',        alias: 'amount',   type: 'number',  required: true,  allowedValues: [],                              storageCol: 'amount'   },
-      { key: 'status',   label: 'PHẢN HỒI',       alias: 'status',   type: 'string',  required: true,  allowedValues: ['THANH CONG','TIMEOUT','THAT BAI'], storageCol: 'status' },
+      { key: 'seq',      label: 'SEQ',           alias: 'seq',      type: 'integer', required: true,  allowedValues: [],                                  storageCol: 'seq'      },
+      { key: 'trace',    label: 'TRACE NUMBER',   alias: 'trace',    type: 'integer', required: true,  allowedValues: [],                                  storageCol: 'trace'    },
+      { key: 'hostdate', label: 'HOSTDATE',       alias: 'hostdate', type: 'date',    required: true,  allowedValues: [],                                  storageCol: 'hostdate' },
+      { key: 'amount',   label: 'SỐ TIỀN',        alias: 'amount',   type: 'number',  required: true,  allowedValues: [],                                  storageCol: 'amount'   },
+      { key: 'status',   label: 'PHẢN HỒI',       alias: 'status',   type: 'string',  required: true,  allowedValues: ['THANH CONG','TIMEOUT','THAT BAI'], storageCol: 'status'   },
     ],
   },
   {
     id: 'swift_den', name: 'Swift Report Đến', storageTable: 'Swift',
     description: 'Báo cáo giao dịch chuyển tiền đến qua Swift',
+    acceptedExtensions: ['.xlsx', '.xls'],
     fields: [
-      { key: 'seq',      label: 'SEQ',       alias: 'seq',      type: 'integer', required: false, allowedValues: [],                              storageCol: 'seq'      },
-      { key: 'trace',    label: 'TRACE',     alias: 'trace',    type: 'integer', required: true,  allowedValues: [],                              storageCol: 'trace'    },
-      { key: 'hostdate', label: 'HOST DATE', alias: 'hostdate', type: 'date',    required: true,  allowedValues: [],                              storageCol: 'hostdate' },
-      { key: 'amount',   label: 'SỐ TIỀN',   alias: 'amount',   type: 'number',  required: true,  allowedValues: [],                              storageCol: 'amount'   },
-      { key: 'status',   label: 'PHẢN HỒI',  alias: 'status',   type: 'string',  required: true,  allowedValues: ['THANH CONG','THAT BAI'],        storageCol: 'status'   },
+      { key: 'seq',      label: 'SEQ',       alias: 'seq',      type: 'integer', required: false, allowedValues: [],                        storageCol: 'seq'      },
+      { key: 'trace',    label: 'TRACE',     alias: 'trace',    type: 'integer', required: true,  allowedValues: [],                        storageCol: 'trace'    },
+      { key: 'hostdate', label: 'HOST DATE', alias: 'hostdate', type: 'date',    required: true,  allowedValues: [],                        storageCol: 'hostdate' },
+      { key: 'amount',   label: 'SỐ TIỀN',   alias: 'amount',   type: 'number',  required: true,  allowedValues: [],                        storageCol: 'amount'   },
+      { key: 'status',   label: 'PHẢN HỒI',  alias: 'status',   type: 'string',  required: true,  allowedValues: ['THANH CONG','THAT BAI'], storageCol: 'status'   },
     ],
   },
   {
     id: 'core', name: 'Core (Ghi có / Ghi nợ)', storageTable: 'Core',
     description: 'Dữ liệu giao dịch từ hệ thống Core Banking',
+    acceptedExtensions: ['.xlsx', '.xls'],
     fields: [
-      { key: 'dien_giai', label: 'DIỄN GIẢI', alias: 'dien_giai', type: 'string',  required: true,  allowedValues: [], storageCol: 'dien_giai' },
-      { key: 'teller',    label: 'TELLER',    alias: 'teller',    type: 'integer', required: false, allowedValues: [], storageCol: 'teller'    },
-      { key: 'seq',       label: 'SEQ',       alias: 'seq',       type: 'integer', required: false, allowedValues: [], storageCol: 'seq'       },
-      { key: 'trace',     label: 'TRACE',     alias: 'trace',     type: 'integer', required: false, allowedValues: [], storageCol: 'trace'     },
-      { key: 'kind',      label: 'Loại GD',   alias: 'kind',      type: 'string',  required: false, allowedValues: ['DI','DEN'],                storageCol: 'kind'      },
+      { key: 'dien_giai', label: 'DIỄN GIẢI', alias: 'dien_giai', type: 'string',  required: true,  allowedValues: [],         storageCol: 'dien_giai' },
+      { key: 'teller',    label: 'TELLER',    alias: 'teller',    type: 'integer', required: false, allowedValues: [],         storageCol: 'teller'    },
+      { key: 'seq',       label: 'SEQ',       alias: 'seq',       type: 'integer', required: false, allowedValues: [],         storageCol: 'seq'       },
+      { key: 'trace',     label: 'TRACE',     alias: 'trace',     type: 'integer', required: false, allowedValues: [],         storageCol: 'trace'     },
+      { key: 'kind',      label: 'Loại GD',   alias: 'kind',      type: 'string',  required: false, allowedValues: ['DI','DEN'], storageCol: 'kind'    },
     ],
   },
   {
     id: 'napas_di', name: 'Napas Đi', storageTable: 'NAPAS',
     description: 'Giao dịch chuyển tiền đi qua kênh NAPAS',
+    acceptedExtensions: ['.xlsx', '.xls'],
     fields: [
-      { key: 'trace',  label: 'Số trace', alias: 'trace',  type: 'integer', required: true,  allowedValues: [], storageCol: 'trace'  },
-      { key: 'amount', label: 'Số tiền',  alias: 'amount', type: 'number',  required: true,  allowedValues: [], storageCol: 'amount' },
-      { key: 'ngay',   label: 'Ngày GD',  alias: 'ngay',   type: 'string',  required: true,  allowedValues: [], storageCol: 'ngay'   },
+      { key: 'trace',  label: 'Số trace', alias: 'trace',  type: 'integer', required: true, allowedValues: [], storageCol: 'trace'  },
+      { key: 'amount', label: 'Số tiền',  alias: 'amount', type: 'number',  required: true, allowedValues: [], storageCol: 'amount' },
+      { key: 'ngay',   label: 'Ngày GD',  alias: 'ngay',   type: 'string',  required: true, allowedValues: [], storageCol: 'ngay'   },
     ],
   },
   {
     id: 'napas_den', name: 'Napas Đến', storageTable: 'NAPAS',
     description: 'Giao dịch chuyển tiền đến qua kênh NAPAS',
+    acceptedExtensions: ['.xlsx', '.xls'],
     fields: [
-      { key: 'trace',  label: 'Số trace', alias: 'trace',  type: 'integer', required: true,  allowedValues: [], storageCol: 'trace'  },
-      { key: 'amount', label: 'Số tiền',  alias: 'amount', type: 'number',  required: true,  allowedValues: [], storageCol: 'amount' },
-      { key: 'ngay',   label: 'Ngày GD',  alias: 'ngay',   type: 'string',  required: true,  allowedValues: [], storageCol: 'ngay'   },
+      { key: 'trace',  label: 'Số trace', alias: 'trace',  type: 'integer', required: true, allowedValues: [], storageCol: 'trace'  },
+      { key: 'amount', label: 'Số tiền',  alias: 'amount', type: 'number',  required: true, allowedValues: [], storageCol: 'amount' },
+      { key: 'ngay',   label: 'Ngày GD',  alias: 'ngay',   type: 'string',  required: true, allowedValues: [], storageCol: 'ngay'   },
     ],
   },
   {
     id: 'napas_di_fail', name: 'Napas Đi Thất bại', storageTable: 'NAPAS',
     description: 'Giao dịch chuyển tiền đi thất bại (KTC)',
+    acceptedExtensions: ['.xlsx'],
     fields: [
       { key: 'trace',  label: 'Số trace', alias: 'trace',  type: 'integer', required: true, allowedValues: [], storageCol: 'trace'  },
       { key: 'amount', label: 'Số tiền',  alias: 'amount', type: 'number',  required: true, allowedValues: [], storageCol: 'amount' },
@@ -80,26 +83,40 @@ const DEFAULT_FILE_TYPES = [
 const DATA_TYPES = ['string', 'integer', 'number', 'date', 'boolean']
 
 export default function FileTypeSettings() {
-  const [fileTypes, setFileTypes] = useState(DEFAULT_FILE_TYPES)
-  const [expanded, setExpanded]   = useState('swift_di')
+  const [fileTypes, setFileTypes]     = useState(DEFAULT_FILE_TYPES)
+  const [expanded, setExpanded]       = useState(null)
   const [addFieldModal, setAddFieldModal] = useState(null)
-  const [testModal, setTestModal]   = useState(null)
-  const [newField, setNewField]     = useState({ label: '', alias: '', type: 'string', required: false, allowedValues: [], storageCol: '' })
+  const [testModal, setTestModal]     = useState(null)
+  const [newField, setNewField]       = useState({ label: '', alias: '', type: 'string', required: false, allowedValues: [], storageCol: '' })
   const [newAllowedVal, setNewAllowedVal] = useState('')
+  const [extInputs, setExtInputs]     = useState({})
 
   const toggle = (id) => setExpanded(e => e === id ? null : id)
 
   const updateField = (ftId, fieldKey, patch) =>
     setFileTypes(prev => prev.map(ft =>
-      ft.id !== ftId ? ft : {
-        ...ft, fields: ft.fields.map(f => f.key !== fieldKey ? f : { ...f, ...patch })
-      }
+      ft.id !== ftId ? ft : { ...ft, fields: ft.fields.map(f => f.key !== fieldKey ? f : { ...f, ...patch }) }
     ))
 
   const removeField = (ftId, fieldKey) =>
     setFileTypes(prev => prev.map(ft =>
       ft.id !== ftId ? ft : { ...ft, fields: ft.fields.filter(f => f.key !== fieldKey) }
     ))
+
+  const removeExtension = (ftId, idx) =>
+    setFileTypes(prev => prev.map(ft =>
+      ft.id !== ftId ? ft : { ...ft, acceptedExtensions: ft.acceptedExtensions.filter((_, i) => i !== idx) }
+    ))
+
+  const addExtension = (ftId) => {
+    const raw = (extInputs[ftId] ?? '').trim()
+    if (!raw) return
+    const ext = raw.startsWith('.') ? raw : '.' + raw
+    setFileTypes(prev => prev.map(ft =>
+      ft.id !== ftId ? ft : { ...ft, acceptedExtensions: [...(ft.acceptedExtensions ?? []), ext] }
+    ))
+    setExtInputs(p => ({ ...p, [ftId]: '' }))
+  }
 
   const saveNewField = () => {
     if (!newField.label || !addFieldModal) return
@@ -113,8 +130,8 @@ export default function FileTypeSettings() {
 
   return (
     <PageShell
-      title="Cấu hình loại file & Trường dữ liệu"
-      subtitle="Định nghĩa các loại file hệ thống chấp nhận, trường trích xuất và cách ánh xạ vào bảng lưu trữ."
+      title="Cấu hình dạng file tải lên"
+      subtitle="Định nghĩa loại file hệ thống chấp nhận, trường dữ liệu trích xuất và ánh xạ vào bảng lưu trữ."
       actions={<Button size="sm">+ Thêm loại file</Button>}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -128,11 +145,14 @@ export default function FileTypeSettings() {
             onRemoveField={(key) => removeField(ft.id, key)}
             onUpdateField={(fieldKey, patch) => updateField(ft.id, fieldKey, patch)}
             onTest={() => setTestModal(ft)}
+            onRemoveExtension={(idx) => removeExtension(ft.id, idx)}
+            extInput={extInputs[ft.id] ?? ''}
+            onExtInputChange={(val) => setExtInputs(p => ({ ...p, [ft.id]: val }))}
+            onAddExtension={() => addExtension(ft.id)}
           />
         ))}
       </div>
 
-      {/* Add field modal */}
       <Modal open={!!addFieldModal} title="Thêm trường dữ liệu" onClose={() => setAddFieldModal(null)} onConfirm={saveNewField} confirmLabel="Thêm trường" width={500}>
         <FormRow label="Tên cột trong file (keyword nhận diện)">
           <Input placeholder="VD: TRACE NUMBER" value={newField.label} onChange={e => setNewField(p => ({ ...p, label: e.target.value }))} />
@@ -153,14 +173,14 @@ export default function FileTypeSettings() {
           </FormRow>
           <FormRow label=" ">
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginTop: 6 }}>
-              <input type="checkbox" checked={newField.required} onChange={e => setNewField(p => ({ ...p, required: e.target.checked }))} style={{ accentColor: C.primary, width: 14, height: 14 }} />
+              <input type="checkbox" checked={newField.required} onChange={e => setNewField(p => ({ ...p, required: e.target.checked }))} style={{ accentColor: C.error, width: 14, height: 14 }} />
               Trường bắt buộc
             </label>
           </FormRow>
         </div>
         <FormRow label="Giá trị được phép (để trống = không giới hạn)">
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <Input placeholder="Nhập giá trị rồi nhấn Thêm..." value={newAllowedVal} onChange={e => setNewAllowedVal(e.target.value)}
+            <Input placeholder="Nhập rồi Enter..." value={newAllowedVal} onChange={e => setNewAllowedVal(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && newAllowedVal.trim()) { setNewField(p => ({ ...p, allowedValues: [...p.allowedValues, newAllowedVal.trim()] })); setNewAllowedVal('') } }} />
             <Button size="sm" variant="subtle" onClick={() => { if (newAllowedVal.trim()) { setNewField(p => ({ ...p, allowedValues: [...p.allowedValues, newAllowedVal.trim()] })); setNewAllowedVal('') } }}>Thêm</Button>
           </div>
@@ -175,19 +195,18 @@ export default function FileTypeSettings() {
         </FormRow>
       </Modal>
 
-      {/* Test upload modal */}
       <TestUploadModal ft={testModal} onClose={() => setTestModal(null)} />
     </PageShell>
   )
 }
 
-function FileTypeCard({ ft, expanded, onToggle, onAddField, onRemoveField, onUpdateField, onTest }) {
+function FileTypeCard({ ft, expanded, onToggle, onAddField, onRemoveField, onUpdateField, onTest, onRemoveExtension, extInput, onExtInputChange, onAddExtension }) {
   const color = TYPE_COLORS[ft.id] ?? C.primary
   const storageColor = { Swift: '#2563eb', Core: '#059669', NAPAS: '#d97706' }[ft.storageTable] ?? C.primary
+  const exts = ft.acceptedExtensions ?? []
 
   return (
     <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderLeft: `4px solid ${color}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-      {/* Header */}
       <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', cursor: 'pointer', borderBottom: expanded ? `1px solid ${C.cardBorder}` : 'none' }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 3 }}>{ft.name}</div>
@@ -196,13 +215,36 @@ function FileTypeCard({ ft, expanded, onToggle, onAddField, onRemoveField, onUpd
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Badge variant="neutral">{ft.fields.length} trường</Badge>
           <span style={{ padding: '2px 9px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: storageColor + '1a', color: storageColor, border: `1px solid ${storageColor}44` }}>→ {ft.storageTable}</span>
-          <Badge variant="primary">Excel .xlsx</Badge>
+          {exts.map(ext => (
+            <span key={ext} style={{ padding: '2px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: C.primaryLight, color: C.primary, border: `1px solid ${C.primaryBorder}` }}>{ext}</span>
+          ))}
           <span style={{ color: C.textLight, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
         </div>
       </div>
 
       {expanded && (
         <div style={{ padding: '16px 20px' }}>
+          {/* Accepted extensions */}
+          <SectionLabel>Định dạng file chấp nhận</SectionLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16, alignItems: 'center' }}>
+            {exts.map((ext, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', background: C.primaryLight, color: C.primary, border: `1px solid ${C.primaryBorder}`, borderRadius: 20, fontSize: 12, fontWeight: 500 }}>
+                {ext}
+                <button onClick={() => onRemoveExtension(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.primary, fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            ))}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <Input
+                value={extInput}
+                onChange={e => onExtInputChange(e.target.value)}
+                placeholder=".csv"
+                style={{ width: 80, fontSize: 12, padding: '3px 8px' }}
+                onKeyDown={e => { if (e.key === 'Enter') onAddExtension() }}
+              />
+              <Button size="sm" variant="subtle" onClick={onAddExtension}>+ Thêm</Button>
+            </div>
+          </div>
+
           {/* Fields table */}
           <SectionLabel>Trường trích xuất & Giá trị được phép</SectionLabel>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 16 }}>
@@ -236,11 +278,7 @@ function FileTypeCard({ ft, expanded, onToggle, onAddField, onRemoveField, onUpd
                   <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 12, color: C.primary }}>{f.alias}</td>
                   <td style={{ padding: '8px 12px', color: C.textLight, fontSize: 16, textAlign: 'center' }}>→</td>
                   <td style={{ padding: '8px 12px' }}>
-                    <Input
-                      value={f.storageCol}
-                      onChange={e => onUpdateField(f.key, { storageCol: e.target.value })}
-                      style={{ fontFamily: 'monospace', fontSize: 12, padding: '4px 8px' }}
-                    />
+                    <Input value={f.storageCol} onChange={e => onUpdateField(f.key, { storageCol: e.target.value })} style={{ fontFamily: 'monospace', fontSize: 12, padding: '4px 8px' }} />
                   </td>
                   <td style={{ padding: '8px 12px', fontSize: 12, color: C.textMuted }}>{f.type === 'date' ? 'Chuẩn hóa sang YYYYMMDD' : f.allowedValues.length ? `Enum: ${f.allowedValues.join(', ')}` : ''}</td>
                 </tr>
@@ -329,8 +367,7 @@ function TestUploadModal({ ft, onClose }) {
     setLoading(true)
     setTimeout(() => {
       setResult({
-        totalRows: 2685,
-        validRows: 2684,
+        totalRows: 2685, validRows: 2684,
         errors: [
           { row: 4, field: 'status', value: 'BAD_STATUS', reason: 'Không nằm trong giá trị được phép: THANH CONG, TIMEOUT, THAT BAI' },
           { row: 4, field: 'seq',    value: null,          reason: 'Trường bắt buộc bị thiếu giá trị' },
@@ -349,7 +386,7 @@ function TestUploadModal({ ft, onClose }) {
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Tải file mẫu lên để kiểm tra</label>
         <div style={{ display: 'flex', gap: 10 }}>
-          <input type="file" accept=".xlsx,.xls" onChange={e => { setFile(e.target.files?.[0] ?? null); setResult(null) }}
+          <input type="file" accept={(ft.acceptedExtensions ?? ['.xlsx','.xls']).join(',')} onChange={e => { setFile(e.target.files?.[0] ?? null); setResult(null) }}
             style={{ flex: 1, padding: '6px', border: `1px solid ${C.cardBorder}`, borderRadius: radius.md, fontSize: 13 }} />
           <Button onClick={runTest} disabled={!file || loading} variant="primary" style={{ background: color, borderColor: color }}>
             {loading ? 'Đang trích xuất...' : '▶ Chạy kiểm tra'}
@@ -360,9 +397,9 @@ function TestUploadModal({ ft, onClose }) {
       {result && (
         <>
           <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-            <StatBox label="Tổng dòng đọc được" val={result.totalRows.toLocaleString()} color={C.primary} />
-            <StatBox label="Dòng hợp lệ"         val={result.validRows.toLocaleString()} color={C.success} />
-            <StatBox label="Dòng có lỗi"          val={result.errors.length}              color={result.errors.length ? C.error : C.success} />
+            <StatBox label="Tổng dòng" val={result.totalRows.toLocaleString()} color={C.primary} />
+            <StatBox label="Hợp lệ"    val={result.validRows.toLocaleString()} color={C.success} />
+            <StatBox label="Lỗi"       val={result.errors.length}              color={result.errors.length ? C.error : C.success} />
           </div>
 
           {result.errors.length > 0 && (
