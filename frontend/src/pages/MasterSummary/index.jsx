@@ -256,20 +256,30 @@ function CountPair({ count, amt, col, isActive, onClick, borderRight = '1px soli
       <td style={{ ...base, padding:'7px 8px', textAlign:'right', borderRight }} />
     </>
   )
+
+  /* Default: neutral. Expanded hoặc active: dùng màu col */
+  const showColor = expanded || isActive
+  const btnBg     = showColor ? col.bg    : '#f3f4f6'
+  const btnColor  = showColor ? col.color : '#6b7280'
+  const btnBorder = isActive  ? `1.5px solid ${col.border}`
+                  : showColor ? `1px solid ${col.border}88`
+                  : '1px solid #e5e7eb'
+  const cellBg    = isActive ? col.bg : 'transparent'
+  const amtColor  = showColor ? col.color : '#9ca3af'
+
   return (
     <>
-      <td style={{ ...base, padding:'7px 6px', textAlign:'center', background: isActive ? col.bg : 'transparent', borderRight }}>
+      <td style={{ ...base, padding:'7px 6px', textAlign:'center', background: cellBg, borderRight }}>
         <button onClick={onClick} title={col.label}
           style={{
             padding:'3px 7px', borderRadius:6,
             fontSize:12, fontWeight:700, cursor:'pointer',
-            border: isActive ? `1.5px solid ${col.border}` : `1px solid ${col.border}66`,
-            background: col.bg, color: col.color,
+            border: btnBorder, background: btnBg, color: btnColor,
           }}>
           {count}
         </button>
       </td>
-      <td style={{ ...base, padding:'7px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:col.color, background: isActive ? col.bg : 'transparent', borderRight }}>
+      <td style={{ ...base, padding:'7px 8px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: amtColor, background: cellBg, borderRight }}>
         {amt > 0 ? amt.toLocaleString('vi-VN') : ''}
       </td>
     </>
@@ -457,7 +467,7 @@ export default function MasterSummary() {
               </tr>
             </thead>
             <tbody>
-              {filteredDays.map(day => {
+              {filteredDays.map((day, dayIdx) => {
                 const dayRows      = allRows.filter(r => r.day === day)
                 const expanded     = expandKey?.startsWith(day + ':')
                 const expandSuffix = expanded ? expandKey.slice(day.length + 1) : null
@@ -486,12 +496,15 @@ export default function MasterSummary() {
                   }
                 }
 
+                const rowBg = expanded ? '#eff6ff' : (dayIdx % 2 ? '#f9fafb' : '#fff')
+
                 return (
                   <>
-                    <tr key={day} style={{ background: expanded ? '#fffdf5' : '#fff' }}>
+                    <tr key={day} style={{ background: rowBg }}>
                       <td style={{ padding:'12px 12px', fontWeight:700, fontSize:13, color:'#111827',
                         borderBottom: expanded ? 'none' : `1px solid ${C.cardBorder}`,
-                        borderRight:`2px solid ${C.cardBorder}`, whiteSpace:'nowrap' }}>
+                        borderRight:`2px solid ${C.cardBorder}`, whiteSpace:'nowrap',
+                        background: expanded ? '#dbeafe' : rowBg }}>
                         {day}
                         <div style={{ fontSize:11, fontWeight:400, color:C.textMuted, marginTop:1 }}>
                           {fmtAmt(sumAmt(dayRows))}
@@ -511,7 +524,7 @@ export default function MasterSummary() {
                               borderBottom: expanded ? 'none' : `1px solid ${C.cardBorder}`,
                               borderRight:`1px solid ${s.border}`,
                               background: totActive ? s.bg : 'transparent',
-                              color: secTotal ? s.color : '#d1d5db',
+                              color: secTotal ? (totActive || expanded ? s.color : '#6b7280') : '#d1d5db',
                               cursor: secTotal ? 'pointer' : 'default',
                             }}
                               onClick={() => secTotal && toggleExpand(totalKey)}>
@@ -522,7 +535,7 @@ export default function MasterSummary() {
                               borderBottom: expanded ? 'none' : `1px solid ${C.cardBorder}`,
                               borderRight:`1px solid ${s.border}`,
                               background: totActive ? s.bg : 'transparent',
-                              color: secTotal ? s.color : '#d1d5db',
+                              color: secTotal ? (totActive || expanded ? s.color : '#9ca3af') : '#d1d5db',
                             }}>
                               {secAmt > 0 ? secAmt.toLocaleString('vi-VN') : ''}
                             </td>
