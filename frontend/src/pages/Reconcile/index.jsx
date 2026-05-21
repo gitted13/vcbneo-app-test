@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
 import Button from '../../components/Button'
 import Modal from '../../components/Modal'
@@ -6,8 +6,9 @@ import { Input, Select, FormRow } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
-import { RECON_STATUS_META, RESOLUTION_OF, INITIAL_ROWS, LAST_SYNC_INFO } from '../../data/reconcile'
+import { RECON_STATUS_META, RESOLUTION_OF, LAST_SYNC_INFO } from '../../data/reconcile'
 import { LastSyncBanner } from '../../components/ReconShared'
+import { api } from '../../api/client'
 
 /* ── Chip components ───────────────────────────────────────────────────────── */
 function SourceChip({ label, color, bg }) {
@@ -170,7 +171,16 @@ export default function Reconcile() {
   const { user } = useAuth()
   const { toast } = useApp()
   const [activeTab, setActiveTab] = useState(0)
-  const [rows, setRows]           = useState(INITIAL_ROWS)
+  const [rows, setRows]           = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [apiError, setApiError]   = useState(null)
+
+  useEffect(() => {
+    api.getRows()
+      .then(data => setRows(data.rows ?? []))
+      .catch(e => setApiError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
 
   const onResolve = (rowId, noteInput) => {
     const row = rows.find(r => r.id === rowId)
@@ -223,6 +233,21 @@ export default function Reconcile() {
 
   return (
     <PageShell title="Đối soát" subtitle="So khớp 3 chiều: Swift ↔ Core · NAPAS ↔ Core · Core ↔ Swift + NAPAS. Chọn chiều Đi hoặc Đến trong từng giao diện.">
+      {loading && (
+        <div style={{ padding: '40px 0', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+          Đang tải dữ liệu đối soát...
+        </div>
+      )}
+      {!loading && apiError && (
+        <div style={{ padding: '14px 16px', marginBottom: 16, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 13, color: '#dc2626' }}>
+          Không thể tải dữ liệu: <b>{apiError}</b>. Kiểm tra backend đang chạy và đã tải file lên.
+        </div>
+      )}
+      {!loading && !apiError && rows.length === 0 && (
+        <div style={{ padding: '40px 0', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+          Chưa có dữ liệu đối soát. Hãy tải file lên tại trang <b>Tải lên dữ liệu</b> trước.
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 0 }}>
         {/* Left nav */}
         <nav style={{ width: 200, flexShrink: 0, paddingRight: 16, borderRight: `1px solid ${C.cardBorder}` }}>

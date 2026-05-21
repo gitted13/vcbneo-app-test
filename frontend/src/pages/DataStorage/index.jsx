@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
 import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
 import { C, radius, shadow } from '../../theme'
+import { api } from '../../api/client'
 
 function formatDate(val) {
   const s = String(val ?? '')
@@ -143,14 +144,59 @@ const RAW_MOCK = {
 }
 
 export default function DataStorage() {
+  const [fileStatus, setFileStatus] = useState(null)
+
+  const refreshStatus = () => api.getStatus().then(setFileStatus).catch(() => {})
+
+  useEffect(() => { refreshStatus() }, [])
+
   return (
     <PageShell title="Kho dữ liệu" subtitle="Dữ liệu thô đã trích xuất từ 3 nguồn. Kết quả đối soát và master giao dịch xem tại trang Đối soát.">
-      <RawDataTab />
+      <FileStatusBanner status={fileStatus} />
+      <RawDataTab fileStatus={fileStatus} onRefresh={refreshStatus} />
     </PageShell>
   )
 }
 
-function RawDataTab() {
+function FileStatusBanner({ status }) {
+  if (!status) return null
+  const slots = Object.entries(status)
+  const present = slots.filter(([, v]) => v.exists).length
+  const total   = slots.length
+  const allOk   = present === total
+
+  const SLOT_LABELS = {
+    swift_di:      'Swift Đi',
+    swift_den:     'Swift Đến',
+    core:          'Core',
+    napas_di:      'Napas Đi',
+    napas_den:     'Napas Đến',
+    napas_di_fail: 'Napas KTC',
+  }
+
+  return (
+    <div style={{ marginBottom: 16, padding: '12px 16px', background: allOk ? '#f0fdf4' : '#fffbeb', border: `1px solid ${allOk ? '#bbf7d0' : '#fde68a'}`, borderRadius: 8, fontSize: 13 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600, color: allOk ? '#059669' : '#d97706' }}>
+          {allOk ? `Đủ ${total} file ·` : `${present}/${total} file ·`}
+        </span>
+        {slots.map(([slot, v]) => (
+          <span key={slot} style={{
+            padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+            background: v.exists ? '#dcfce7' : '#fee2e2',
+            color: v.exists ? '#166534' : '#dc2626',
+            border: `1px solid ${v.exists ? '#bbf7d0' : '#fecaca'}`,
+          }}>
+            {SLOT_LABELS[slot] ?? slot}
+            {v.exists && v.sheets ? ` (${v.sheets.length} ngày)` : v.exists ? '' : ' — chưa tải'}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RawDataTab({ fileStatus, onRefresh }) {
   const [activeTableId, setActiveTableId] = useState('swift')
   const [activeSubtabs, setActiveSubtabs] = useState({ swift: 'swift_di', core: 'core_ghico', napas: 'napas_di' })
   const [search, setSearch]               = useState('')
@@ -221,9 +267,17 @@ function RawDataTab() {
             </div>
             <div style={{ fontSize: 12, color: C.textMuted }}>{totalRows.toLocaleString()} bản ghi tổng · cập nhật {subtab?.lastUpdate}</div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {fileStatus && (() => {
+              const slotMap = { swift: ['swift_di','swift_den'], core: ['core'], napas: ['napas_di','napas_den','napas_di_fail'] }
+              const slots = slotMap[activeTableId] ?? []
+              const anyMissing = slots.some(s => fileStatus[s] && !fileStatus[s].exists)
+              return anyMissing
+                ? <span style={{ fontSize: 11, color: '#d97706', fontWeight: 600 }}>Chưa đủ file</span>
+                : <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>File OK</span>
+            })()}
             <Button size="sm" variant="ghost">Xuất CSV</Button>
-            <Button size="sm" variant="subtle">Làm mới</Button>
+            <Button size="sm" variant="subtle" onClick={onRefresh}>Làm mới</Button>
           </div>
         </div>
 

@@ -6,6 +6,7 @@ import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { C, radius, shadow } from '../../theme'
+import { api } from '../../api/client'
 
 const FILE_TYPES = [
   { id: 'swift_di',      name: 'Swift Report Đi',         color: '#2563eb' },
@@ -89,10 +90,10 @@ function ManualTab() {
   const handleDrop = (id, f) => {
     const ext = f.name.split('.').pop()?.toLowerCase()
     if (!['xlsx', 'xls'].includes(ext)) {
-      setFiles(prev => ({ ...prev, [id]: { name: f.name, size: f.size, valid: false, error: 'Chỉ chấp nhận file .xlsx hoặc .xls' } }))
+      setFiles(prev => ({ ...prev, [id]: { name: f.name, size: f.size, valid: false, error: 'Chỉ chấp nhận file .xlsx hoặc .xls', file: null } }))
       return
     }
-    setFiles(prev => ({ ...prev, [id]: { name: f.name, size: f.size, valid: true, error: null } }))
+    setFiles(prev => ({ ...prev, [id]: { name: f.name, size: f.size, valid: true, error: null, file: f } }))
   }
 
   const requiredUploaded = FILE_TYPES.filter(ft => !ft.optional).every(ft => files[ft.id]?.valid)
@@ -100,9 +101,26 @@ function ManualTab() {
 
   const handleSave = async () => {
     setSaving(true)
-    await new Promise(r => setTimeout(r, 1800))
+    const validSlots = FILE_TYPES.filter(ft => files[ft.id]?.valid && files[ft.id]?.file)
+    const errors = []
+    let successCount = 0
+
+    for (const ft of validSlots) {
+      try {
+        await api.upload(ft.id, files[ft.id].file)
+        successCount++
+      } catch (e) {
+        errors.push(`${ft.name}: ${e.message}`)
+      }
+    }
+
     setSaving(false)
-    toast(`Đã trích xuất và lưu ${totalValid} file thành công.`, 'success')
+    if (errors.length === 0) {
+      toast(`Đã tải lên ${successCount} file thành công.`, 'success')
+      setFiles({})
+    } else {
+      toast(`${successCount} file thành công. Lỗi: ${errors.join(' · ')}`, 'error')
+    }
   }
 
   return (
