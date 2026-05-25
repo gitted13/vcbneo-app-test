@@ -10,7 +10,7 @@ _password = os.getenv("DB_PASSWORD", "")
 # Windows Auth when no user/password; SQL Server Auth otherwise (Linux/Docker)
 if _user:
     _CONN_STR = (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"DRIVER={{ODBC Driver 18 for SQL Server}};"
         f"SERVER={_server};"
         f"DATABASE={_database};"
         f"UID={_user};"
