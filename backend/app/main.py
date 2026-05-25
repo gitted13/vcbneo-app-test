@@ -11,12 +11,12 @@ from app.db.seed import seed_flex, init_reconcile_tables, seed_reconcile_configs
 logger = logging.getLogger(__name__)
 
 
-def _wait_for_db(retries: int = 10, delay: float = 5.0):
-    """Retry DB connection until SQL Server is ready (relevant in Docker)."""
-    from app.db.connection import get_connection
+def _wait_for_db(retries: int = 15, delay: float = 5.0):
+    """Retry until SQL Server is ready. Connects to master so vcbneo need not exist yet."""
+    from app.db.connection import get_master_connection
     for attempt in range(1, retries + 1):
         try:
-            conn = get_connection()
+            conn = get_master_connection()
             conn.close()
             return
         except Exception as e:

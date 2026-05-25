@@ -4,8 +4,10 @@ services:
     restart: unless-stopped
     environment:
       - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=${DB_PASSWORD:-VCBNeo@2026!}
+      - MSSQL_SA_PASSWORD=${SA_PASSWORD:-Sa@VCBNeo2026!}
       - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
     volumes:
       - mssql_data:/var/opt/mssql
     healthcheck:
@@ -27,8 +29,9 @@ services:
     environment:
       - DB_SERVER=db
       - DB_NAME=${DB_NAME:-vcbneo}
-      - DB_USER=sa
-      - DB_PASSWORD=${DB_PASSWORD:-VCBNeo@2026!}
+      - DB_USER=vcbneo_app
+      - DB_PASSWORD=${DB_PASSWORD:-App@VCBNeo2026!}
+      - SA_PASSWORD=${SA_PASSWORD:-Sa@VCBNeo2026!}
       - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost"]}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
