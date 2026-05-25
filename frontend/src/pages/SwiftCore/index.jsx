@@ -115,32 +115,6 @@ export default function SwiftCore() {
       title="Đối chiếu Swift với Core GL"
       subtitle="Swift làm nguồn gốc — kiểm tra từng giao dịch Swift có khớp bên Core GL không."
     >
-      {/* Data flow banner */}
-      <div style={{ marginBottom: 20, padding: '12px 16px', background: '#f8fafc', border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>Luồng đối chiếu</div>
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, fontWeight: 800, color: '#1d4ed8' }}>Swift Đi</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>→</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #86efac', fontSize: 12, fontWeight: 800, color: '#166534' }}>Core Ghi có</span>
-            <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 4 }}>khớp bằng Sequence + Số tiền</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#f5f3ff', border: '1px solid #ddd6fe', fontSize: 12, fontWeight: 800, color: '#7c3aed' }}>Swift Đến</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>→</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dbeafe', border: '1px solid #93c5fd', fontSize: 12, fontWeight: 800, color: '#1e40af' }}>Core Ghi nợ</span>
-            <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 4 }}>khớp bằng Sequence + Số tiền</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderLeft: '1px solid #e5e7eb', paddingLeft: 16 }}>
-            <span style={{ fontSize: 11, color: C.textMuted }}>
-              <b>Ngày ghi nhận</b> = HOSTDATE (ngày Swift xử lý) &nbsp;|&nbsp;
-              <b>Ngày GD</b> = THỜI GIAN thực tế &nbsp;|&nbsp;
-              <b>T+1</b> khi hai ngày khác nhau
-            </span>
-          </div>
-        </div>
-      </div>
-
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
         <DirectionToggle value={dir} onChange={d => { setDir(d); setRI(null) }} />
         <span style={{ fontSize: 12, color: C.textMuted }}>

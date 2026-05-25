@@ -125,11 +125,9 @@ export async function downloadDetailXlsx({ title, dir, filterFrom, filterTo, hea
    Mỗi cột số liệu gồm 2 sub-col: Số món | Số tiền. ─────────────────────── */
 
 function buildTemplateSheet(XLSX, filteredDays, dirRows, colDefs, titleRow3, titleRow4, label) {
-  /* colDefs: [{ name, fn }] — fn(dayRows) → [count, amount] */
-  const N_DATA = colDefs.length   /* number of data col-pairs */
-  const TOTAL  = 2 + N_DATA * 2  /* date + label + N*2 */
-
-  const dateStr = new Date().toLocaleDateString('vi-VN')
+  /* colDefs: [{ name, group, fn }] — fn(dayRows) → [count, amount] */
+  const N_DATA = colDefs.length
+  const TOTAL  = 2 + N_DATA * 2
 
   /* ── Row 0-5: header block ── */
   const blank = Array(TOTAL).fill('')
@@ -140,17 +138,22 @@ function buildTemplateSheet(XLSX, filteredDays, dirRows, colDefs, titleRow3, tit
   const r4 = [...blank]
   const r5 = [...blank]
 
-  /* ── Row 6: col-group row (Ngày, Nội dung, group names) ── */
-  const r6 = ['Ngày ', 'Nội dung']
-  colDefs.forEach(cd => { r6.push(cd.group ?? cd.name, ...Array(1).fill('')) })
+  /* ── Row 6: group labels — only placed at first col of each run ── */
+  const r6 = ['Ngày', 'Nội dung']
+  let prevGroup = null
+  colDefs.forEach(cd => {
+    const g = cd.group ?? cd.name
+    r6.push(g !== prevGroup ? g : '', '')
+    prevGroup = g
+  })
 
-  /* ── Row 7: sub-group row ── */
+  /* ── Row 7: sub-group labels ── */
   const r7 = ['', '']
-  colDefs.forEach(cd => { r7.push(cd.name, '') })
+  colDefs.forEach(cd => r7.push(cd.name, ''))
 
-  /* ── Row 8: leaf row (Số món / Số tiền) ── */
+  /* ── Row 8: leaf labels (Số món / Số tiền) ── */
   const r8 = ['', '']
-  colDefs.forEach(() => { r8.push('Số món', 'Số tiền') })
+  colDefs.forEach(() => r8.push('Số món', 'Số tiền'))
 
   /* ── Data rows ── */
   const dataRows = filteredDays.map(day => {
@@ -173,21 +176,31 @@ function buildTemplateSheet(XLSX, filteredDays, dirRows, colDefs, titleRow3, tit
   const aoa = [r0, r1, r2, r3, r4, r5, r6, r7, r8, ...dataRows, totalRow]
   const ws = XLSX.utils.aoa_to_sheet(aoa)
 
-  /* Merges: date + label span rows 6-8, each col-pair spans row 7 */
+  /* ── Merges ── */
   const merges = [
-    { s:{r:6,c:0}, e:{r:8,c:0} },  /* Ngày spans 3 rows */
-    { s:{r:6,c:1}, e:{r:8,c:1} },  /* Nội dung spans 3 rows */
+    { s:{r:6,c:0}, e:{r:8,c:0} },  /* Ngày spans 3 header rows */
+    { s:{r:6,c:1}, e:{r:8,c:1} },  /* Nội dung spans 3 header rows */
     { s:{r:0,c:0}, e:{r:0,c:TOTAL-1} },
     { s:{r:1,c:0}, e:{r:1,c:TOTAL-1} },
     { s:{r:3,c:0}, e:{r:3,c:TOTAL-1} },
   ]
-  colDefs.forEach((cd, ci) => {
+
+  /* Group merges in row 6: merge consecutive same-group sub-cols into one cell */
+  let gi = 0
+  while (gi < colDefs.length) {
+    const gName = colDefs[gi].group ?? colDefs[gi].name
+    let gEnd = gi
+    while (gEnd + 1 < colDefs.length && (colDefs[gEnd + 1].group ?? colDefs[gEnd + 1].name) === gName) gEnd++
+    merges.push({ s:{r:6,c:2+gi*2}, e:{r:6,c:2+gEnd*2+1} })
+    gi = gEnd + 1
+  }
+
+  /* Sub-group merges in row 7: each sub-col spans its 2 leaf cols */
+  colDefs.forEach((_, ci) => {
     const c = 2 + ci * 2
-    /* group label spans row 6 (2 cols) */
-    merges.push({ s:{r:6,c}, e:{r:6,c:c+1} })
-    /* sub-group label spans row 7 (2 cols) */
     merges.push({ s:{r:7,c}, e:{r:7,c:c+1} })
   })
+
   ws['!merges'] = merges
 
   /* Styles */
@@ -292,42 +305,40 @@ export async function downloadTemplateXlsx({ filteredDays, allRows, filterFrom, 
   const tbT1    = calc(r => !!r.swift && r.swift.status==='THAT_BAI'   && isT1fn(r))
   const totT1   = add2(tcT1, tbT1)
   const coreAll = calc(r => !!r.swift && !!r.core)
-  const chiSwift= calc(r => !!r.swift && !r.core && r.swift.status==='THANH_CONG')
 
   const colsDi = [
-    { name:'Tổng cộng',             group:'Tổng phát sinh trên Swift',   fn:swiftDi, bg:'#BFDBFE', color:'#1E3A8A' },
-    { name:'Trạng thái Thành công', group:'Ghi nhận Core ngày T',        fn:tcT,     bg:'#DCFCE7', color:'#166534' },
-    { name:'Trạng thái Timeout',    group:'Ghi nhận Core ngày T',        fn:toT,     bg:'#FEF9C3', color:'#854D0E' },
-    { name:'Trạng thái Thất bại',   group:'Ghi nhận Core ngày T',        fn:tbT,     bg:'#FEE2E2', color:'#991B1B' },
-    { name:'Tổng cộng T',           group:'Ghi nhận Core ngày T',        fn:totT,    bg:'#E0F2FE', color:'#0369A1' },
-    { name:'Thành công T+1',        group:'Ghi nhận Core ngày T+1',      fn:tcT1,    bg:'#ECFDF5', color:'#065F46' },
-    { name:'Thất bại T+1',          group:'Ghi nhận Core ngày T+1',      fn:tbT1,    bg:'#FEF2F2', color:'#991B1B' },
-    { name:'Tổng cộng T+1',         group:'Ghi nhận Core ngày T+1',      fn:totT1,   bg:'#E0F2FE', color:'#0369A1' },
-    { name:'Tổng số',               group:'Số phát sinh tài khoản GL ngày T', fn:coreAll, bg:'#F3F4F6', color:'#374151' },
-    { name:'Chỉ Swift',             group:'Số phát sinh tài khoản GL ngày T', fn:chiSwift, bg:'#FEF2F2', color:'#991B1B' },
+    { name:'Tổng cộng', group:'Tổng phát sinh trên Swift',        fn:swiftDi, bg:'#BFDBFE', color:'#1E3A8A' },
+    { name:'TC T',      group:'Tổng phát sinh trên Swift',        fn:tcT,     bg:'#DCFCE7', color:'#166534' },
+    { name:'TO T',      group:'Tổng phát sinh trên Swift',        fn:toT,     bg:'#FEF9C3', color:'#854D0E' },
+    { name:'TB T',      group:'Tổng phát sinh trên Swift',        fn:tbT,     bg:'#FEE2E2', color:'#991B1B' },
+    { name:'Tổng T',    group:'Tổng phát sinh trên Swift',        fn:totT,    bg:'#E0F2FE', color:'#0369A1' },
+    { name:'TC T+1',    group:'Tổng phát sinh trên Swift',        fn:tcT1,    bg:'#ECFDF5', color:'#065F46' },
+    { name:'TB T+1',    group:'Tổng phát sinh trên Swift',        fn:tbT1,    bg:'#FEF2F2', color:'#991B1B' },
+    { name:'Tổng T+1',  group:'Số phát sinh tài khoản GL ngày T', fn:totT1,  bg:'#E0F2FE', color:'#0369A1' },
+    { name:'Tổng số',   group:'Số phát sinh tài khoản GL ngày T', fn:coreAll, bg:'#F3F4F6', color:'#374151' },
   ]
 
   /* Đến direction col defs */
-  const swiftDen = calc(r => !!r.swift)
-  const tcTd     = calc(r => !!r.swift && r.swift.status==='THANH_CONG' && !isT1fn(r) && !!r.core)
-  const tbTd     = calc(r => !!r.swift && r.swift.status==='THAT_BAI'   && !isT1fn(r))
-  const totTd    = add2(tcTd, tbTd)
-  const tcT1d    = calc(r => !!r.swift && r.swift.status==='THANH_CONG' && isT1fn(r) && !!r.core)
-  const tbT1d    = calc(r => !!r.swift && r.swift.status==='THAT_BAI'   && isT1fn(r))
-  const totT1d   = add2(tcT1d, tbT1d)
-  const coreAlld = calc(r => !!r.swift && !!r.core)
-  const chiSwiftd= calc(r => !!r.swift && !r.core && r.swift.status==='THANH_CONG')
+  const swiftDen  = calc(r => !!r.swift)
+  const tcTd      = calc(r => !!r.swift && r.swift.status==='THANH_CONG' && !isT1fn(r) && !!r.core)
+  const tbTd      = calc(r => !!r.swift && r.swift.status==='THAT_BAI'   && !isT1fn(r))
+  const totTd     = add2(tcTd, tbTd)
+  const tcT1d     = calc(r => !!r.swift && r.swift.status==='THANH_CONG' && isT1fn(r) && !!r.core)
+  const tbT1d     = calc(r => !!r.swift && r.swift.status==='THAT_BAI'   && isT1fn(r))
+  const totT1d    = add2(tcT1d, tbT1d)
+  const coreAlld  = calc(r => !!r.swift && !!r.core)
+  const napasT1d  = calc(r => !!r.napas && r.napas.type === 'QT')
 
   const colsDen = [
-    { name:'Tổng cộng',             group:'Tổng phát sinh trên Swift',   fn:swiftDen, bg:'#BFDBFE', color:'#1E3A8A' },
-    { name:'Trạng thái Thành công', group:'Ghi nhận Core ngày T',        fn:tcTd,     bg:'#DCFCE7', color:'#166534' },
-    { name:'Trạng thái Thất bại',   group:'Ghi nhận Core ngày T',        fn:tbTd,     bg:'#FEE2E2', color:'#991B1B' },
-    { name:'Tổng cộng T',           group:'Ghi nhận Core ngày T',        fn:totTd,    bg:'#E0F2FE', color:'#0369A1' },
-    { name:'Thành công T+1',        group:'Ghi nhận Core ngày T+1',      fn:tcT1d,    bg:'#ECFDF5', color:'#065F46' },
-    { name:'Thất bại T+1',          group:'Ghi nhận Core ngày T+1',      fn:tbT1d,    bg:'#FEF2F2', color:'#991B1B' },
-    { name:'Tổng cộng T+1',         group:'Ghi nhận Core ngày T+1',      fn:totT1d,   bg:'#E0F2FE', color:'#0369A1' },
-    { name:'Tổng số',               group:'Số phát sinh tài khoản GL ngày T', fn:coreAlld, bg:'#F3F4F6', color:'#374151' },
-    { name:'Chỉ Swift',             group:'Số phát sinh tài khoản GL ngày T', fn:chiSwiftd, bg:'#FEF2F2', color:'#991B1B' },
+    { name:'Tổng cộng', group:'Tổng phát sinh trên Swift',        fn:swiftDen, bg:'#BFDBFE', color:'#1E3A8A' },
+    { name:'TC T',      group:'Tổng phát sinh trên Swift',        fn:tcTd,     bg:'#DCFCE7', color:'#166534' },
+    { name:'TB T',      group:'Tổng phát sinh trên Swift',        fn:tbTd,     bg:'#FEE2E2', color:'#991B1B' },
+    { name:'Tổng T',    group:'Tổng phát sinh trên Swift',        fn:totTd,    bg:'#E0F2FE', color:'#0369A1' },
+    { name:'TC T+1',    group:'Tổng phát sinh trên Swift',        fn:tcT1d,    bg:'#ECFDF5', color:'#065F46' },
+    { name:'TB T+1',    group:'Số phát sinh tài khoản GL ngày T', fn:tbT1d,   bg:'#FEF2F2', color:'#991B1B' },
+    { name:'Tổng T+1',  group:'Số phát sinh tài khoản GL ngày T', fn:totT1d, bg:'#E0F2FE', color:'#0369A1' },
+    { name:'Tổng số',   group:'Số phát sinh tài khoản GL ngày T', fn:coreAlld, bg:'#F3F4F6', color:'#374151' },
+    { name:'T-1 NAPAS', group:'Số phát sinh tài khoản GL ngày T', fn:napasT1d, bg:'#FEF9C3', color:'#854D0E' },
   ]
 
   /* Sheet 3: Core vs NAPAS tổng hợp */

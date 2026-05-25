@@ -110,32 +110,6 @@ export default function NapasCore() {
       title="Đối chiếu NAPAS với Core GL"
       subtitle="NAPAS làm nguồn gốc — kiểm tra từng giao dịch NAPAS có khớp bên Core GL không."
     >
-      {/* Data flow banner */}
-      <div style={{ marginBottom: 20, padding: '12px 16px', background: '#f8fafc', border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>Luồng đối chiếu</div>
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fefce8', border: '1px solid #fde68a', fontSize: 12, fontWeight: 800, color: '#854d0e' }}>NAPAS Đi (TC/KTC)</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>→</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #86efac', fontSize: 12, fontWeight: 800, color: '#166534' }}>Core Ghi có</span>
-            <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 4 }}>khớp bằng Trace + Số tiền</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fefce8', border: '1px solid #fde68a', fontSize: 12, fontWeight: 800, color: '#854d0e' }}>NAPAS Đến TC</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>→</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dbeafe', border: '1px solid #93c5fd', fontSize: 12, fontWeight: 800, color: '#1e40af' }}>Core Ghi nợ</span>
-            <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 4 }}>khớp bằng Trace + Số tiền</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, borderLeft: '1px solid #e5e7eb', paddingLeft: 16 }}>
-            <span style={{ fontSize: 11, color: C.textMuted }}>
-              <b>Ngày GD</b> = ngày NAPAS ghi nhận &nbsp;|&nbsp;
-              <b>Giờ GD</b> = giờ thực tế &nbsp;|&nbsp;
-              <b>QT</b> = giao dịch qua đêm từ T-1
-            </span>
-          </div>
-        </div>
-      </div>
-
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
         <DirectionToggle value={dir} onChange={d => { setDir(d); setRI(null) }} />
         <span style={{ fontSize: 12, color: C.textMuted }}>

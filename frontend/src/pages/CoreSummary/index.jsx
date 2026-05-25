@@ -139,27 +139,6 @@ export default function CoreSummary() {
       title="Đối chiếu Core GL – Tổng hợp"
       subtitle="Core GL làm nguồn gốc — đối chiếu đồng thời với Swift và NAPAS (1 Core ↔ 2 nguồn)."
     >
-      {/* Data flow banner */}
-      <div style={{ marginBottom: 20, padding: '12px 16px', background: '#f8fafc', border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.6 }}>Luồng đối chiếu (1 Core ↔ 2 nguồn)</div>
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dcfce7', border: '1px solid #86efac', fontSize: 12, fontWeight: 800, color: '#166534' }}>Core Ghi có</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>↔</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, fontWeight: 800, color: '#1d4ed8' }}>Swift Đi</span>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>+</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fefce8', border: '1px solid #fde68a', fontSize: 12, fontWeight: 800, color: '#854d0e' }}>NAPAS Đi</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dbeafe', border: '1px solid #93c5fd', fontSize: 12, fontWeight: 800, color: '#1e40af' }}>Core Ghi nợ</span>
-            <span style={{ fontSize: 16, color: '#6b7280', fontWeight: 700 }}>↔</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#f5f3ff', border: '1px solid #ddd6fe', fontSize: 12, fontWeight: 800, color: '#7c3aed' }}>Swift Đến</span>
-            <span style={{ fontSize: 13, color: '#6b7280' }}>+</span>
-            <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fefce8', border: '1px solid #fde68a', fontSize: 12, fontWeight: 800, color: '#854d0e' }}>NAPAS Đến</span>
-          </div>
-        </div>
-      </div>
-
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
         <EntryToggle value={entry} onChange={e => { setEntry(e); setRI(null) }} />
         <span style={{ fontSize: 12, color: C.textMuted }}>
