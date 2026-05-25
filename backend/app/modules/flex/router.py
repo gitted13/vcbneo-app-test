@@ -268,6 +268,13 @@ async def upload_file(
 
     # 4. Persist to DB — one row per transaction
     unique_key: list[str] = schema_obj.get("unique_key") or []
+
+    # Detect which fields are required (excluding fixed_value columns)
+    required_fields = [
+        c["field_name"] for c in col_defs
+        if c.get("required") and c.get("fixed_value") is None
+    ]
+
     status = "error" if any(e for e in errors if "bắt buộc" in e["reason"]) else "ok"
 
     with db_cursor() as cur:
@@ -299,7 +306,12 @@ async def upload_file(
 
         saved_count = 0
         dup_count   = 0
+        skip_count  = 0
         for row_json in rows_data:
+            # Skip rows where every required field is None (blank rows between header/data)
+            if required_fields and all(row_json.get(f) is None for f in required_fields):
+                skip_count += 1
+                continue
             if unique_key:
                 k = _row_key(type_id, unique_key, row_json)
                 if k and k in existing_keys:
@@ -318,6 +330,7 @@ async def upload_file(
         "file_id":        file_id,
         "row_count":      saved_count,
         "duplicate_count": dup_count,
+        "skip_count":     skip_count,
         "error_count":    len(errors),
         "errors":         errors[:10],
         "upload_name":    upload_name,

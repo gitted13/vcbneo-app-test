@@ -4,6 +4,7 @@ Returns a list of row dicts matching the frontend data model.
 """
 from __future__ import annotations
 import re
+import unicodedata
 from pathlib import Path
 
 import openpyxl
@@ -113,7 +114,8 @@ def _sheet_to_day(sh: str) -> str:
 
 
 def _swift_status(st_raw: str) -> str:
-    u = st_raw.upper()
+    # Strip diacritics so "THÀNH CÔNG" and "THANH CONG" both match
+    u = unicodedata.normalize('NFD', str(st_raw)).encode('ascii', 'ignore').decode().upper()
     if 'THANH' in u:
         return 'THANH_CONG'
     if 'TIMEOUT' in u:

@@ -120,12 +120,15 @@ def _build_from_db() -> list[dict]:
     rows: list[dict] = []
     rid = 1
 
-    # Swift DI rows — giữ lại TẤT CẢ rows, chỉ bỏ qua NAPAS/Core lookup nếu thiếu key
+    # Swift DI rows — giữ lại TẤT CẢ rows có ít nhất 1 trường key không rỗng
     for r in swift_di_rows:
         d = r['data']
         trace = _to_str(d.get('trace_number')) or None
         seq   = _to_str(d.get('seq')) or None
         amt   = _to_int(d.get('số_tiền')) or 0
+        # Bỏ qua row trắng (header/blank) lọt vào DB khi upload
+        if trace is None and seq is None and amt == 0:
+            continue
 
         txn_date, _ = _parse_swift_di_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('hostdate')) or txn_date
@@ -170,12 +173,15 @@ def _build_from_db() -> list[dict]:
         })
         rid += 1
 
-    # Swift DEN rows — giữ lại TẤT CẢ rows
+    # Swift DEN rows — giữ lại TẤT CẢ rows có ít nhất 1 trường key không rỗng
     for r in swift_den_rows:
         d = r['data']
         trace = _to_str(d.get('trace')) or None
         seq   = _to_str(d.get('seq')) or None
         amt   = _to_int(d.get('số_tiền')) or 0
+        # Bỏ qua row trắng
+        if trace is None and seq is None and amt == 0:
+            continue
 
         txn_date, _ = _parse_swift_den_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('host_date')) or txn_date

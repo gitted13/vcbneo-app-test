@@ -66,7 +66,19 @@ def get_transaction_rows_from_db():
     """Unified rows built from DB — same format as /rows but reads uploadedFileRows."""
     try:
         rows = get_db_rows()
-        return {"success": True, "rows": rows, "total": len(rows)}
+        # Status breakdown by direction for diagnostics
+        from collections import Counter
+        di_counts  = Counter(r["recon_status"] for r in rows if r["direction"] == "Đi")
+        den_counts = Counter(r["recon_status"] for r in rows if r["direction"] == "Đến")
+        return {
+            "success": True,
+            "rows": rows,
+            "total": len(rows),
+            "status_counts": {
+                "Đi":  dict(di_counts),
+                "Đến": dict(den_counts),
+            },
+        }
     except Exception as e:
         raise HTTPException(
             status_code=500,
