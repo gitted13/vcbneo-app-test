@@ -57,7 +57,7 @@ export default function SwiftCore() {
     if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
     return true
   })
-  const unmatchedBase = dateBase.filter(r => !r.core && r.swift?.status !== 'THAT_BAI' && r.recon_status !== 'NAPAS_THAT_BAI')
+  const unmatchedBase = dateBase.filter(r => !r.core && r.swift?.status !== 'THAT_BAI')
   const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {

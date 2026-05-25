@@ -90,7 +90,7 @@ export default function CoreSummary() {
                           && (!filterTo   || !r.day || dayToISO(r.day) <= filterTo)
   const base          = rows.filter(r => r.direction === dir && r.core)
   const dateBase      = base.filter(inRange)
-  const unmatchedBase = dateBase.filter(r => !r.swift || !r.napas)
+  const unmatchedBase = dateBase.filter(r => !r.swift && !r.napas)
   const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {
@@ -207,10 +207,10 @@ export default function CoreSummary() {
           <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#dc2626', fontWeight: 700 }}>!</span>
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>
-              {unmatchedBase.length} giao dịch Core thiếu đối ứng từ ít nhất một nguồn ({entry === 'Ghi có' ? 'Swift Đi hoặc NAPAS Đi' : 'Swift Đến hoặc NAPAS Đến'})
+              {unmatchedBase.length} giao dịch Core không thể truy vết nguồn gốc ({entry === 'Ghi có' ? 'không có Swift Đi lẫn NAPAS Đi' : 'không có Swift Đến lẫn NAPAS Đến'})
             </div>
             <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-              Core ghi nhận giao dịch nhưng một hoặc cả hai bên đối chiếu không có dữ liệu tương ứng — cần điều tra nguyên nhân.
+              Core ghi nhận giao dịch nhưng không tìm thấy bất kỳ đối ứng nào từ Swift hoặc NAPAS — không thể xác định nguồn gốc, cần điều tra thủ công. Lưu ý: giao dịch chỉ có Swift (không có NAPAS) vẫn là hợp lệ và được ghi nhận ở cột riêng.
             </div>
           </div>
         </div>
