@@ -46,4 +46,96 @@ export const api = {
     dateLabels.forEach(d => params.append('date_labels', d))
     return `${BASE}/report/export/excel?${params}`
   },
+
+  // Reconcile config + flex pipeline endpoints
+  reconcileConfig: {
+    // Join configs (JoinLogic page)
+    getJoinConfigs: () => request('/reconcile/join-configs'),
+    createJoinConfig: (config, created_by = 'user') =>
+      request('/reconcile/join-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config, created_by }),
+      }),
+    updateJoinConfig: (id, config, created_by = 'user') =>
+      request(`/reconcile/join-configs/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config, created_by }),
+      }),
+    deleteJoinConfig: (id) =>
+      request(`/reconcile/join-configs/${id}`, { method: 'DELETE' }),
+
+    // Status rules (DateRules page)
+    getStatusRules: () => request('/reconcile/status-rules'),
+    saveStatusRules: (rules, updated_by = 'user') =>
+      request('/reconcile/status-rules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules, updated_by }),
+      }),
+
+    // Flex reconcile pipeline
+    runFlex: (config_id, run_date = null, created_by = 'user') =>
+      request('/reconcile/run-flex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config_id, run_date, created_by }),
+      }),
+    getFlexResults: (config_id, run_date = null) => {
+      const params = new URLSearchParams({ config_id })
+      if (run_date) params.set('run_date', run_date)
+      return request(`/reconcile/flex-results?${params}`)
+    },
+    getFlexSummary: (config_id, run_date = null) => {
+      const params = new URLSearchParams({ config_id })
+      if (run_date) params.set('run_date', run_date)
+      return request(`/reconcile/flex-summary?${params}`)
+    },
+    getFlexRunDates: (config_id) =>
+      request(`/reconcile/flex-run-dates?config_id=${config_id}`),
+    patchFlexResult: (result_id, patch) =>
+      request(`/reconcile/flex-results/${result_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }),
+  },
+
+  // Flex / dynamic DB endpoints
+  flex: {
+    getSystems: () => request('/flex/systems'),
+    getTypes: (systemCode) => {
+      const params = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : ''
+      return request(`/flex/types${params}`)
+    },
+    getRows: (typeId) => request(`/flex/rows?type_id=${typeId}`),
+    getFiles: (typeId) => {
+      const params = typeId != null ? `?type_id=${typeId}` : ''
+      return request(`/flex/files${params}`)
+    },
+    upload: (typeId, file) => {
+      const fd = new FormData()
+      fd.append('type_id', typeId)
+      fd.append('file', file)
+      return request('/flex/upload', { method: 'POST', body: fd })
+    },
+    patchType: (typeId, patch) =>
+      request(`/flex/types/${typeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }),
+    createType: (body) =>
+      request('/flex/types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    scanFile: (file) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return request('/flex/scan-file', { method: 'POST', body: fd })
+    },
+  },
 }

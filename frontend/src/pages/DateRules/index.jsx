@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import PageShell from '../../components/PageShell'
 import { C, radius, shadow } from '../../theme'
 import { SWIFT_COLS_DI, SWIFT_COLS_DEN, NAPAS_COLS_DI, NAPAS_COLS_DEN, CORE_COLS_DI, CORE_COLS_DEN } from '../../data/reconcile'
+import { api } from '../../api/client'
 
 const F = (f, op, v) => ({ f, op, v })
 
@@ -75,19 +76,6 @@ const VALUE_SUGGESTIONS = {
   'Swift & NAPAS': ['null'],
 }
 
-const LS_KEY = 'vcbneo_dateRulesConds_v2'
-
-function loadConds() {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  return DEFAULT_CONDS
-}
-
-function persistConds(c) {
-  localStorage.setItem(LS_KEY, JSON.stringify(c))
-}
 
 /* ── Chip ─────────────────────────────────────────────────────────────────── */
 function Chip({ chip, onRemove }) {
@@ -299,21 +287,35 @@ const SECTIONS = [
 /* ── Main ─────────────────────────────────────────────────────────────────── */
 export default function DateRules() {
   const [activeTabs, setActiveTabs] = useState({ swift: 0, napas: 0, core: 0 })
-  const [conds, setConds]           = useState(loadConds)
+  const [conds, setConds]           = useState(DEFAULT_CONDS)
+  const [saving, setSaving]         = useState(false)
+  const [dbLoaded, setDbLoaded]     = useState(false)
+
+  useEffect(() => {
+    api.reconcileConfig.getStatusRules()
+      .then(res => {
+        if (res.rules && Object.keys(res.rules).length > 0) setConds(res.rules)
+        setDbLoaded(true)
+      })
+      .catch(() => setDbLoaded(true))
+  }, [])
 
   const setTab = (sectionId, idx) => setActiveTabs(p => ({ ...p, [sectionId]: idx }))
 
-  const handleSaveRow = (condKey, rowIdx, newChips) => {
+  const handleSaveRow = useCallback((condKey, rowIdx, newChips) => {
     setConds(prev => {
       const next = { ...prev, [condKey]: prev[condKey].map((r, i) => i === rowIdx ? newChips : r) }
-      persistConds(next)
+      setSaving(true)
+      api.reconcileConfig.saveStatusRules(next)
+        .finally(() => setSaving(false))
       return next
     })
-  }
+  }, [])
 
   const handleReset = () => {
     setConds(DEFAULT_CONDS)
-    localStorage.removeItem(LS_KEY)
+    setSaving(true)
+    api.reconcileConfig.saveStatusRules(DEFAULT_CONDS).finally(() => setSaving(false))
   }
 
   const modified = JSON.stringify(conds) !== JSON.stringify(DEFAULT_CONDS)
@@ -321,7 +323,7 @@ export default function DateRules() {
   return (
     <PageShell
       title="Phân loại trạng thái đối soát"
-      subtitle="Điều kiện dữ liệu tạo ra từng trạng thái — bấm ✎ để chỉnh sửa, lưu vào trình duyệt."
+      subtitle="Điều kiện dữ liệu tạo ra từng trạng thái — bấm ✎ để chỉnh sửa, tự động lưu vào DB."
     >
       {/* Info bar */}
       <div style={{
@@ -331,7 +333,8 @@ export default function DateRules() {
       }}>
         <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ</span>
         <span style={{ flex: 1 }}>
-          Bấm <b>✎</b> trên từng dòng để chỉnh sửa điều kiện. Thay đổi được lưu vào bộ nhớ trình duyệt.
+          Bấm <b>✎</b> trên từng dòng để chỉnh sửa điều kiện.
+          {saving ? ' Đang lưu...' : ' Thay đổi tự động lưu vào DB.'}
         </span>
         {modified && (
           <button onClick={handleReset} style={{
@@ -350,7 +353,7 @@ export default function DateRules() {
           fontSize: 12, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8,
         }}>
           <span style={{ fontWeight: 700 }}>⚠</span>
-          Cấu hình đang khác mặc định — các thay đổi chỉ ảnh hưởng đến hiển thị tài liệu trên trang này.
+          Cấu hình đang khác mặc định — đã lưu vào DB, ảnh hưởng đến kết quả phân loại đối soát.
         </div>
       )}
 

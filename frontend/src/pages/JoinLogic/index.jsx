@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
 import Badge from '../../components/Badge'
 import Button from '../../components/Button'
@@ -8,6 +8,13 @@ import { Input, Select, FormRow } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
+import { api } from '../../api/client'
+
+// DB item → local shape
+const toLocal = (item) => ({ id: item.id, ...item.config, lastRun: item.created, status: 'success' })
+// local shape → config object sent to API
+const toConfig = ({ name, leftSource, rightSource, direction, joinType, matchFields }) =>
+  ({ name, leftSource, rightSource, direction, joinType, matchFields })
 
 /*
  * Mỗi rule so khớp được định nghĩa ở cấp nguồn (Swift / Core / NAPAS),
@@ -95,9 +102,17 @@ export default function JoinLogic() {
   const isAdmin  = user?.role === 'Admin'
   const isViewer = user?.role === 'Viewer'
 
-  const [logics, setLogics]     = useState(INITIAL_LOGICS)
+  const [logics, setLogics]     = useState([])
+  const [loading, setLoading]   = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
+
+  useEffect(() => {
+    api.reconcileConfig.getJoinConfigs()
+      .then(items => setLogics(items.map(toLocal)))
+      .catch(() => toast('Không thể tải cấu hình đối chiếu.', 'error'))
+      .finally(() => setLoading(false))
+  }, [])
 
   const openCreate = () => { setEditing(null); setFormOpen(true) }
   const openEdit   = (item) => { setEditing(item); setFormOpen(true) }
@@ -108,8 +123,12 @@ export default function JoinLogic() {
     variant: 'danger',
     confirmLabel: 'Xóa',
     onConfirm: () => {
-      setLogics(prev => prev.filter(l => l.id !== item.id))
-      toast(`Đã xóa rule "${item.name} – ${item.direction}".`, 'success')
+      api.reconcileConfig.deleteJoinConfig(item.id)
+        .then(() => {
+          setLogics(prev => prev.filter(l => l.id !== item.id))
+          toast(`Đã xóa rule "${item.name} – ${item.direction}".`, 'success')
+        })
+        .catch(() => toast('Xóa thất bại.', 'error'))
     },
   })
 
@@ -119,7 +138,9 @@ export default function JoinLogic() {
       subtitle="Định nghĩa trường so khớp giữa 3 cặp nguồn dữ liệu (Swift / Core / NAPAS). Chiều GD và trường ghép là điều kiện của từng rule."
       actions={isAdmin ? <Button size="sm" onClick={openCreate}>+ Tạo rule mới</Button> : null}
     >
-      {logics.length === 0
+      {loading
+        ? <div style={{ padding: '60px 0', textAlign: 'center', color: C.textMuted }}>Đang tải...</div>
+        : logics.length === 0
         ? <EmptyState icon="🔗" title="Chưa có rule nào" description="Tạo rule so khớp đầu tiên." action={isAdmin ? '+ Tạo rule mới' : undefined} onAction={isAdmin ? openCreate : undefined} />
         : (
           <>
@@ -179,14 +200,24 @@ export default function JoinLogic() {
           editing={editing}
           onClose={() => setFormOpen(false)}
           onSave={(data) => {
+            const config = toConfig(data)
             if (editing) {
-              setLogics(prev => prev.map(l => l.id === editing.id ? { ...l, ...data } : l))
-              toast('Đã lưu thay đổi.', 'success')
+              api.reconcileConfig.updateJoinConfig(editing.id, config)
+                .then(() => {
+                  setLogics(prev => prev.map(l => l.id === editing.id ? { ...l, ...data } : l))
+                  toast('Đã lưu thay đổi.', 'success')
+                  setFormOpen(false)
+                })
+                .catch(() => toast('Lưu thất bại.', 'error'))
             } else {
-              setLogics(prev => [...prev, { ...data, id: 'jl_' + Date.now(), lastRun: null, status: 'idle' }])
-              toast('Đã tạo rule so khớp mới.', 'success')
+              api.reconcileConfig.createJoinConfig(config)
+                .then(res => {
+                  setLogics(prev => [...prev, toLocal({ id: res.id, config, created: new Date().toISOString() })])
+                  toast('Đã tạo rule so khớp mới.', 'success')
+                  setFormOpen(false)
+                })
+                .catch(() => toast('Tạo thất bại.', 'error'))
             }
-            setFormOpen(false)
           }}
         />
       )}

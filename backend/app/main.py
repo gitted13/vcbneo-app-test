@@ -1,14 +1,40 @@
+import time
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api.v1.router import api_router
+from app.db.seed import seed_flex, init_reconcile_tables, seed_reconcile_configs
+
+logger = logging.getLogger(__name__)
+
+
+def _wait_for_db(retries: int = 10, delay: float = 5.0):
+    """Retry DB connection until SQL Server is ready (relevant in Docker)."""
+    from app.db.connection import get_connection
+    for attempt in range(1, retries + 1):
+        try:
+            conn = get_connection()
+            conn.close()
+            return
+        except Exception as e:
+            if attempt == retries:
+                raise RuntimeError(f"Cannot connect to DB after {retries} attempts: {e}") from e
+            logger.warning("DB not ready (attempt %d/%d): %s — retrying in %.0fs", attempt, retries, e, delay)
+            time.sleep(delay)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    _wait_for_db()
+    from app.db.connection import ensure_database
+    ensure_database()
+    init_reconcile_tables()
+    seed_flex()
+    seed_reconcile_configs()
     yield
 
 
