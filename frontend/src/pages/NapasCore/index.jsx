@@ -27,7 +27,6 @@ export default function NapasCore() {
   const [search, setSearch]  = useState('')
   const [filterCol, setFC]   = useState('')
   const [filterKTC, setKTC]  = useState('')
-  const [activeView, setView] = useState('all')
   const [resolvingId, setRI] = useState(null)
   const [noteInput, setNote] = useState('')
   const [page, setPage]      = useState(1)
@@ -57,23 +56,18 @@ export default function NapasCore() {
     if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
     return true
   })
-  const unmatchedBase = dateBase.filter(r => !r.core && !r.napas?.failed)
-  const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
-
-  const filtered = viewBase.filter(r => {
+  const filtered = dateBase.filter(r => {
     if (search && !r.trace.includes(search) && !(r.sequence ?? '').includes(search)) return false
-    if (activeView === 'all') {
-      if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
-      if (filterCol !== '' && !activeCols[parseInt(filterCol)]?.filterFn(r)) return false
-      if (filterKTC === 'TC'  &&  r.napas.failed) return false
-      if (filterKTC === 'KTC' && !r.napas.failed) return false
-    }
+    if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
+    if (filterCol !== '' && !activeCols[parseInt(filterCol)]?.filterFn(r)) return false
+    if (filterKTC === 'TC'  &&  r.napas.failed) return false
+    if (filterKTC === 'KTC' && !r.napas.failed) return false
     return true
   })
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
 
-  useEffect(() => { setPage(1); setFC(''); setKTC(''); setFrom(''); setTo(''); setKpi(null); setView('all') }, [dir])
-  useEffect(() => { setPage(1) }, [filterCol, filterKTC, activeKpi, search, activeView, filterFrom, filterTo])
+  useEffect(() => { setPage(1); setFC(''); setKTC(''); setFrom(''); setTo(''); setKpi(null) }, [dir])
+  useEffect(() => { setPage(1) }, [filterCol, filterKTC, activeKpi, search, filterFrom, filterTo])
 
   /* KPI metrics */
   const kpiItems = [
@@ -151,47 +145,7 @@ export default function NapasCore() {
         </span>
       </div>
 
-      {/* View tab switcher */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
-        {[
-          { key: 'all',       label: 'Tất cả',       count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
-          { key: 'unmatched', label: 'Chỉ NAPAS TC', count: unmatchedBase.length, color: '#d97706', badgeBg: '#fffbeb' },
-        ].map(t => {
-          const active = activeView === t.key
-          return (
-            <button key={t.key} onClick={() => { setView(t.key); setPage(1) }}
-              style={{ padding: '9px 18px', border: 'none', background: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: active ? 700 : 500,
-                color: active ? t.color : C.textMuted,
-                borderBottom: active ? `2.5px solid ${t.color}` : '2.5px solid transparent',
-                marginBottom: -1, transition: 'all 0.12s' }}>
-              {t.label}
-              {t.count > 0 && (
-                <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 99, fontSize: 11,
-                  fontWeight: 700, background: active ? t.color : t.badgeBg,
-                  color: active ? '#fff' : t.color }}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {activeView === 'all' && <KpiBar items={kpiItems} />}
-      {activeView === 'unmatched' && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#d97706', fontWeight: 700 }}>!</span>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>
-              {unmatchedBase.length} giao dịch NAPAS TC {dir} không có đối ứng bên Core GL — trạng thái "Chỉ NAPAS TC"
-            </div>
-            <div style={{ fontSize: 11, color: '#78350f', marginTop: 2 }}>
-              Đây là trường hợp đã được định nghĩa: NAPAS ghi nhận thành công (TC) nhưng Core GL chưa có bút toán tương ứng. Giao dịch KTC (không thành công) được phân loại riêng trong bảng phân loại trạng thái.
-            </div>
-          </div>
-        </div>
-      )}
+      <KpiBar items={kpiItems} />
 
       <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
         <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg, flexWrap: 'wrap' }}>

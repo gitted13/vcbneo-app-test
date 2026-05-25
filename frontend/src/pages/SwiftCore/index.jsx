@@ -48,8 +48,9 @@ export default function SwiftCore() {
     toast(`Đã xử lý giao dịch ${row?.trace}.`, 'success')
   }
 
-  const activeCols = dir === 'Đi' ? SWIFT_COLS_DI : SWIFT_COLS_DEN
-  const KPI_FN     = Object.fromEntries(activeCols.map((col, i) => [`col${i}`, col.filterFn]))
+  const activeCols  = dir === 'Đi' ? SWIFT_COLS_DI : SWIFT_COLS_DEN
+  const displayCols = activeCols.filter(c => !c.tabOnly)
+  const KPI_FN      = Object.fromEntries(activeCols.map((col, i) => [`col${i}`, col.filterFn]))
 
   const base          = rows.filter(r => r.swift && r.direction === dir)
   const dateBase      = base.filter(r => {
@@ -75,7 +76,7 @@ export default function SwiftCore() {
 
   const kpiItems = [
     { label: 'Tổng', val: dateBase.length, color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', onClick: () => setKpi(null), isActive: false },
-    ...activeCols.map((col, i) => ({
+    ...displayCols.map((col, i) => ({
       label: col.label, val: dateBase.filter(col.filterFn).length,
       color: col.color, bg: col.bg, border: col.border,
       onClick: () => toggleKpi(`col${i}`), isActive: activeKpi === `col${i}`,
@@ -200,7 +201,7 @@ export default function SwiftCore() {
           </div>
           <Select value={filterCol} onChange={e => setFC(e.target.value)} style={{ width: 260 }}>
             <option value="">Tất cả kết quả</option>
-            {activeCols.map((col, i) => (
+            {displayCols.map((col, i) => (
               <option key={i} value={i}>{col.label}</option>
             ))}
           </Select>

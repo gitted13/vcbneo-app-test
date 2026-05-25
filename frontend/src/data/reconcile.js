@@ -61,7 +61,7 @@ export const SWIFT_COLS_DI = [
   { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
   { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
   { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  },
-  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
+  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', tabOnly: true, filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
 ]
 
 /* Swift ↔ Core chiều Đến — TC/TO × T/T+1 + Thất bại + Chỉ Swift */
@@ -72,7 +72,7 @@ export const SWIFT_COLS_DEN = [
   { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
   { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
   { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  },
-  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
+  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', tabOnly: true, filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
 ]
 
 /* CoreSummary Ghi có — Core là gốc (T), Swift và NAPAS so sánh tương đối.
@@ -121,6 +121,8 @@ export const NAPAS_COLS_DEN = [
     filterFn: r => !!r.napas && !r.napas.failed && !!r.core && r.core.date === r.napas.date },
   { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
     filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.core.date) > ymd(r.napas.date) },
+  { label: 'Chỉ NAPAS TC – không có Core', color:'#d97706', bg:'#fffbeb', border:'#fde68a',
+    filterFn: r => !!r.napas && !r.napas.failed && !r.core },
 ]
 
 /* ── Master data – 30 giao dịch thực tế 01–03/02/2026 ─────────────────────── */

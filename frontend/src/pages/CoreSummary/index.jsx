@@ -50,7 +50,6 @@ export default function CoreSummary() {
   const [entry, setEntry]     = useState('Ghi có')
   const [search, setSearch]   = useState('')
   const [filterCol, setFS]    = useState('')
-  const [activeView, setView] = useState('all')
   const [resolvingId, setRI]  = useState(null)
   const [noteInput, setNote]  = useState('')
   const [page, setPage]       = useState(1)
@@ -88,26 +87,22 @@ export default function CoreSummary() {
   const needsAction   = (r) => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by
   const inRange       = r => (!filterFrom || !r.day || dayToISO(r.day) >= filterFrom)
                           && (!filterTo   || !r.day || dayToISO(r.day) <= filterTo)
-  const base          = rows.filter(r => r.direction === dir && r.core)
-  const dateBase      = base.filter(inRange)
-  const unmatchedBase = dateBase.filter(r => !r.swift && !r.napas)
-  const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
+  const base     = rows.filter(r => r.direction === dir && r.core)
+  const dateBase = base.filter(inRange)
 
-  const filtered = viewBase.filter(r => {
+  const filtered = dateBase.filter(r => {
     if (search && !r.trace.includes(search) && !(r.sequence ?? '').includes(search)) return false
-    if (activeView === 'all') {
-      if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
-      if (filterCol === 'NEEDS_ACTION' && !needsAction(r)) return false
-      else if (filterCol && filterCol !== 'NEEDS_ACTION') {
-        const idx = parseInt(filterCol)
-        if (!activeCols[idx]?.filterFn(r)) return false
-      }
+    if (activeKpi && KPI_FN[activeKpi] && !KPI_FN[activeKpi](r)) return false
+    if (filterCol === 'NEEDS_ACTION' && !needsAction(r)) return false
+    else if (filterCol && filterCol !== 'NEEDS_ACTION') {
+      const idx = parseInt(filterCol)
+      if (!activeCols[idx]?.filterFn(r)) return false
     }
     return true
   })
   const paged = filtered.slice((page - 1) * pageSize, page * pageSize)
-  useEffect(() => { setPage(1); setFS(''); setFrom(''); setTo(''); setKpi(null); setView('all') }, [entry])
-  useEffect(() => { setPage(1) }, [filterCol, activeKpi, search, activeView, filterFrom, filterTo])
+  useEffect(() => { setPage(1); setFS(''); setFrom(''); setTo(''); setKpi(null) }, [entry])
+  useEffect(() => { setPage(1) }, [filterCol, activeKpi, search, filterFrom, filterTo])
 
   /* KPI per spec */
   const kpiItems = [
@@ -174,47 +169,7 @@ export default function CoreSummary() {
         </span>
       </div>
 
-      {/* View tab switcher */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
-        {[
-          { key: 'all',       label: 'Tất cả',     count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
-          { key: 'unmatched', label: 'Không khớp', count: unmatchedBase.length, color: '#dc2626', badgeBg: '#fef2f2' },
-        ].map(t => {
-          const active = activeView === t.key
-          return (
-            <button key={t.key} onClick={() => { setView(t.key); setPage(1) }}
-              style={{ padding: '9px 18px', border: 'none', background: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 13, fontWeight: active ? 700 : 500,
-                color: active ? t.color : C.textMuted,
-                borderBottom: active ? `2.5px solid ${t.color}` : '2.5px solid transparent',
-                marginBottom: -1, transition: 'all 0.12s' }}>
-              {t.label}
-              {t.count > 0 && (
-                <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 99, fontSize: 11,
-                  fontWeight: 700, background: active ? t.color : t.badgeBg,
-                  color: active ? '#fff' : t.color }}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {activeView === 'all' && <KpiBar items={kpiItems} />}
-      {activeView === 'unmatched' && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#dc2626', fontWeight: 700 }}>!</span>
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>
-              {unmatchedBase.length} giao dịch Core không thể truy vết nguồn gốc ({entry === 'Ghi có' ? 'không có Swift Đi lẫn NAPAS Đi' : 'không có Swift Đến lẫn NAPAS Đến'})
-            </div>
-            <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-              Core ghi nhận giao dịch nhưng không tìm thấy bất kỳ đối ứng nào từ Swift hoặc NAPAS — không thể xác định nguồn gốc, cần điều tra thủ công. Lưu ý: giao dịch chỉ có Swift (không có NAPAS) vẫn là hợp lệ và được ghi nhận ở cột riêng.
-            </div>
-          </div>
-        </div>
-      )}
+      <KpiBar items={kpiItems} />
 
       <div style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
         <div style={{ display: 'flex', gap: 10, padding: '12px 16px', borderBottom: `1px solid ${C.cardBorder}`, flexWrap: 'wrap', background: C.neutralBg }}>

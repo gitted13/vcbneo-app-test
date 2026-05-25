@@ -26,7 +26,7 @@ export default function Login() {
     await new Promise(r => setTimeout(r, 500))
     const ok = login(form.username, form.password)
     setLoading(false)
-    if (ok) navigate('/file-settings', { replace: true })
+    if (ok) navigate('/dashboard', { replace: true })
     else    setError('Tên đăng nhập hoặc mật khẩu không đúng.')
   }
 
@@ -36,7 +36,7 @@ export default function Login() {
     await new Promise(r => setTimeout(r, 400))
     const ok = login(username, password)
     setLoading(false)
-    if (ok) navigate('/file-settings', { replace: true })
+    if (ok) navigate('/dashboard', { replace: true })
   }
 
   const inputStyle = (hasErr) => ({

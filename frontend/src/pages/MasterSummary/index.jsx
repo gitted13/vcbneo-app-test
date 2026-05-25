@@ -8,7 +8,7 @@ import { isT1, SWIFT_COLS_DI, SWIFT_COLS_DEN, CORE_COLS_DI, CORE_COLS_DEN, NAPAS
 import { DirectionToggle, SwiftStatusCell, NapasTypeTag, NapasStatusCell, StatusBadge, Dash, LastSyncBanner } from '../../components/ReconShared'
 import { api } from '../../api/client'
 import { useApp } from '../../context/AppContext'
-import { downloadMasterXlsx } from '../../utils/export'
+import { downloadMasterXlsx, downloadTemplateXlsx } from '../../utils/export'
 
 /* Tính ngày lệch n ngày từ chuỗi dd/mm/yyyy */
 function dayOffset(ddmmyyyy, n) {
@@ -368,7 +368,7 @@ export default function MasterSummary() {
   const filteredRows   = allRows.filter(r => filteredDaySet.has(r.day))
 
   const handleExport = async () => {
-    await downloadMasterXlsx({ dir, visSections, filteredDays, allRows, filteredRows, sumAmt, filterFrom, filterTo })
+    await downloadTemplateXlsx({ filteredDays, allRows, filterFrom, filterTo, sumAmt, isT1fn: isT1 })
   }
 
   if (loading) return <PageShell title="Tổng hợp 3 nguồn"><div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Đang tải dữ liệu...</div></PageShell>
