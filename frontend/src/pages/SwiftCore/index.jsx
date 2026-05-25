@@ -18,7 +18,7 @@ export default function SwiftCore() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.getRows()
+    api.getDbRows()
       .then(res => setRows(res.rows ?? []))
       .catch(() => toast('Không thể tải dữ liệu từ server.', 'error'))
       .finally(() => setLoading(false))

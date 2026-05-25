@@ -14,6 +14,7 @@ from app.modules.reconciliation.engine_flex import (
 )
 from app.modules.reconciliation.service import get_results
 from app.modules.reconciliation.rows_builder import get_rows, clear_rows_cache
+from app.modules.reconciliation.unified_db_builder import get_db_rows
 
 router = APIRouter()
 
@@ -58,6 +59,19 @@ def get_transaction_rows(
 def clear_rows():
     clear_rows_cache()
     return {"success": True}
+
+
+@router.get("/db-rows")
+def get_transaction_rows_from_db():
+    """Unified rows built from DB — same format as /rows but reads uploadedFileRows."""
+    try:
+        rows = get_db_rows()
+        return {"success": True, "rows": rows, "total": len(rows)}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": str(e), "trace": traceback.format_exc()},
+        )
 
 
 @router.get("/results")

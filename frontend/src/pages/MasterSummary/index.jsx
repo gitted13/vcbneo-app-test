@@ -323,7 +323,7 @@ export default function MasterSummary() {
   }, [loading])
 
   useEffect(() => {
-    api.getRows()
+    api.getDbRows()
       .then(res => setAllData(res.rows ?? []))
       .catch(() => {})
       .finally(() => setLoading(false))

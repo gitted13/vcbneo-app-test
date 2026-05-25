@@ -61,7 +61,7 @@ export default function CoreSummary() {
   const dayToISO = s => { const [d, m, y] = s.split('/'); return `${y}-${m}-${d}` }
 
   useEffect(() => {
-    api.getRows()
+    api.getDbRows()
       .then(res => setRows(res.rows ?? []))
       .catch(() => toast('Không thể tải dữ liệu từ server.', 'error'))
       .finally(() => setLoading(false))

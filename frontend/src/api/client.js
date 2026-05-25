@@ -34,6 +34,8 @@ export const api = {
     return request(`/reconcile/rows?${params}`)
   },
 
+  getDbRows: () => request('/reconcile/db-rows'),
+
   patchRow: (id, patch) =>
     request(`/reconcile/rows/${id}`, {
       method: 'PATCH',

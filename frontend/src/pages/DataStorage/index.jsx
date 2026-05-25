@@ -79,6 +79,8 @@ export default function DataStorage() {
   const [rows, setRows]             = useState([])
   const [rowsLoading, setRLoading]  = useState(false)
   const [search, setSearch]         = useState('')
+  const [dateFrom, setDateFrom]     = useState('')
+  const [dateTo, setDateTo]         = useState('')
   const [page, setPage]             = useState(1)
 
   useEffect(() => {
@@ -96,6 +98,8 @@ export default function DataStorage() {
     setRLoading(true)
     setRows([])
     setSearch('')
+    setDateFrom('')
+    setDateTo('')
     setPage(1)
     api.flex.getRows(activeId)
       .then(setRows)
@@ -108,13 +112,41 @@ export default function DataStorage() {
   const allCols     = (schema.columns || [])
   const displayCols = allCols  // show all cols including fixed_value
 
+  // Detect first date column in active schema
+  const dateCol = allCols.find(c => c.data_type === 'date' || c.data_type === 'datetime')
+
+  // Parse heterogeneous date formats to ISO yyyy-mm-dd for range comparison
+  function toISO(val) {
+    if (val == null) return null
+    const s = String(val).trim()
+    if (!s) return null
+    if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`   // YYYYMMDD
+    if (/^\d{4}$/.test(s)) return `2026-${s.slice(0,2)}-${s.slice(2,4)}`               // MMDD
+    if (/^\d{3}$/.test(s)) return `2026-0${s.slice(0,1)}-${s.slice(1,3)}`              // MDD
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return `${s.slice(6)}-${s.slice(3,5)}-${s.slice(0,2)}` // dd/mm/yyyy
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)                            // ISO
+    return null
+  }
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return rows
-    const q = search.toLowerCase()
-    return rows.filter(row =>
-      Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q))
-    )
-  }, [rows, search])
+    let result = rows
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      result = result.filter(row =>
+        Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q))
+      )
+    }
+    if (dateCol && (dateFrom || dateTo)) {
+      result = result.filter(row => {
+        const iso = toISO(row[dateCol.field_name])
+        if (!iso) return true
+        if (dateFrom && iso < dateFrom) return false
+        if (dateTo   && iso > dateTo)   return false
+        return true
+      })
+    }
+    return result
+  }, [rows, search, dateFrom, dateTo, dateCol])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const pageRows   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -188,16 +220,43 @@ export default function DataStorage() {
           </div>
 
           {/* Search + filter */}
-          <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.cardBorder}`, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.cardBorder}`, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Input
               placeholder="Tìm kiếm trong tất cả cột..."
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1) }}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 160 }}
             />
             {search && (
               <button onClick={() => { setSearch(''); setPage(1) }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 13 }}>✕</button>
+            )}
+            {dateCol && (
+              <>
+                <span style={{ fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap' }}>
+                  {colLabel(dateCol)}:
+                </span>
+                <Input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => { setDateFrom(e.target.value); setPage(1) }}
+                  style={{ width: 130 }}
+                  title="Từ ngày"
+                />
+                <span style={{ fontSize: 11, color: C.textMuted }}>—</span>
+                <Input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => { setDateTo(e.target.value); setPage(1) }}
+                  style={{ width: 130 }}
+                  title="Đến ngày"
+                />
+                {(dateFrom || dateTo) && (
+                  <button onClick={() => { setDateFrom(''); setDateTo(''); setPage(1) }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 13 }}
+                    title="Xóa bộ lọc ngày">✕</button>
+                )}
+              </>
             )}
             <span style={{ fontSize: 12, color: C.textMuted, whiteSpace: 'nowrap' }}>
               {filtered.length !== rows.length ? `${filtered.length} / ${rows.length}` : rows.length.toLocaleString()} dòng
