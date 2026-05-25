@@ -170,7 +170,7 @@ TYPES = [
         "upload_name": "Core Banking",
         "fields_schema": {
             "type_code": "core_banking", "description": "",
-            "unique_key": ["trace", "sequence"],
+            "unique_key": ["trace", "sequence", "số_tiền_ghi_nợ", "số_tiền_ghi_có"],
             "columns": [
                 {"col_name": "STT",            "field_name": "stt",             "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "NGÀY GIAO DỊCH", "field_name": "ngày_giao_dịch", "data_type": "date",    "required": True,  "allowed_values": [], "note": ""},
@@ -414,10 +414,15 @@ def seed_flex():
                 file_type_id = cur.fetchone()[0]
 
             for t in TYPES:
+                schema_json = json.dumps(t["fields_schema"], ensure_ascii=False)
                 cur.execute("SELECT id FROM uploadedTypes WHERE system_id = ? AND upload_name = ?", system_id, t["upload_name"])
                 existing = cur.fetchone()
-                if not existing:
-                    schema_json = json.dumps(t["fields_schema"], ensure_ascii=False)
+                if existing:
+                    cur.execute(
+                        "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
+                        schema_json, existing[0],
+                    )
+                else:
                     cur.execute(
                         "INSERT INTO uploadedTypes (system_id, file_type_id, upload_name, fields_schema, is_active, created, created_by) VALUES (?, ?, ?, ?, 1, GETDATE(), 'system')",
                         system_id, file_type_id, t["upload_name"], schema_json,
