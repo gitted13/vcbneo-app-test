@@ -275,7 +275,7 @@ function HistoryTab({ dbTypes }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+useEffect(() => { load() }, [])
 
   const typeNames = [...new Set(rows.map(r => r.upload_name).filter(Boolean))]
 

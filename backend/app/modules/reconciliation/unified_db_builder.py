@@ -120,16 +120,12 @@ def _build_from_db() -> list[dict]:
     rows: list[dict] = []
     rid = 1
 
-    # Swift DI rows
+    # Swift DI rows — giữ lại TẤT CẢ rows, chỉ bỏ qua NAPAS/Core lookup nếu thiếu key
     for r in swift_di_rows:
         d = r['data']
-        trace = _to_str(d.get('trace_number'))
-        if not trace:
-            continue
-        seq = _to_str(d.get('seq'))
-        amt = _to_int(d.get('số_tiền')) or 0
-        if not amt:
-            continue
+        trace = _to_str(d.get('trace_number')) or None
+        seq   = _to_str(d.get('seq')) or None
+        amt   = _to_int(d.get('số_tiền')) or 0
 
         txn_date, _ = _parse_swift_di_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('hostdate')) or txn_date
@@ -140,8 +136,8 @@ def _build_from_db() -> list[dict]:
         if core_e and core_e['amount'] != amt:
             core_e = None
 
-        is_ktc = trace in napas_ktc
-        n_tc   = napas_di.get(trace)
+        is_ktc = bool(trace and trace in napas_ktc)
+        n_tc   = napas_di.get(trace) if trace else None
         if n_tc and n_tc['amount'] != amt:
             n_tc = None
         if st == 'THAT_BAI':
@@ -161,8 +157,8 @@ def _build_from_db() -> list[dict]:
 
         rows.append({
             'id':        f'r{rid:05d}',
-            'trace':     trace.zfill(6),
-            'sequence':  seq or None,
+            'trace':     trace.zfill(6) if trace else None,
+            'sequence':  seq,
             'direction': 'Đi',
             'amount':    amt,
             'day':       day,
@@ -174,16 +170,12 @@ def _build_from_db() -> list[dict]:
         })
         rid += 1
 
-    # Swift DEN rows
+    # Swift DEN rows — giữ lại TẤT CẢ rows
     for r in swift_den_rows:
         d = r['data']
-        trace = _to_str(d.get('trace'))
-        if not trace:
-            continue
-        seq = _to_str(d.get('seq'))
-        amt = _to_int(d.get('số_tiền')) or 0
-        if not amt:
-            continue
+        trace = _to_str(d.get('trace')) or None
+        seq   = _to_str(d.get('seq')) or None
+        amt   = _to_int(d.get('số_tiền')) or 0
 
         txn_date, _ = _parse_swift_den_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('host_date')) or txn_date
@@ -194,7 +186,7 @@ def _build_from_db() -> list[dict]:
         if core_e and core_e['amount'] != amt:
             core_e = None
 
-        n_tc = napas_den.get(trace)
+        n_tc = napas_den.get(trace) if trace else None
         if n_tc and n_tc['amount'] != amt:
             n_tc = None
         if st == 'THAT_BAI':
@@ -213,8 +205,8 @@ def _build_from_db() -> list[dict]:
 
         rows.append({
             'id':        f'r{rid:05d}',
-            'trace':     trace.zfill(6),
-            'sequence':  seq or None,
+            'trace':     trace.zfill(6) if trace else None,
+            'sequence':  seq,
             'direction': 'Đến',
             'amount':    amt,
             'day':       day,

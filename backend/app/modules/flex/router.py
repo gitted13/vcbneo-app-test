@@ -152,6 +152,22 @@ def list_files(type_id: int | None = Query(None)) -> list[dict]:
         return rows
 
 
+# ── File management ───────────────────────────────────────────────────────────
+
+@router.delete("/files/{file_id}", status_code=200)
+def delete_file(file_id: int):
+    """Soft-delete an uploaded file (set is_active=0). Rows are kept but excluded from all queries."""
+    with db_cursor() as cur:
+        cur.execute("SELECT id, upload_type_id FROM uploadedFiles WHERE id = ?", file_id)
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "File not found")
+        type_id = row[1]
+        cur.execute("UPDATE uploadedFiles SET is_active = 0, modified = GETDATE() WHERE id = ?", file_id)
+    mark_stale_by_type(type_id)
+    return {"ok": True, "file_id": file_id}
+
+
 # ── Upload ────────────────────────────────────────────────────────────────────
 
 @router.post("/upload")
