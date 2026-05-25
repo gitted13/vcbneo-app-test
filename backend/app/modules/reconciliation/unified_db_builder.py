@@ -135,9 +135,16 @@ def _build_from_db() -> list[dict]:
         st          = _swift_status(str(d.get('phản_hồi') or ''))
         day         = txn_date or swift_date or ''
 
-        core_e = core_cred.get(seq) if seq else None
+        # Thử GHI CÓ trước, fallback sang GHI NỢ — Core có thể dùng bút toán nào cũng được
+        core_e      = core_cred.get(seq) if seq else None
+        core_entry  = 'Ghi có'
         if core_e and core_e['amount'] != amt:
             core_e = None
+        if core_e is None:
+            core_e = core_deb.get(seq) if seq else None
+            core_entry = 'Ghi nợ'
+            if core_e and core_e['amount'] != amt:
+                core_e = None
 
         is_ktc = bool(trace and trace in napas_ktc)
         n_tc   = napas_di.get(trace) if trace else None
@@ -166,7 +173,7 @@ def _build_from_db() -> list[dict]:
             'amount':    amt,
             'day':       day,
             'swift':     {'date': swift_date, 'txnDate': txn_date, 'status': st},
-            'core':      {'date': core_e['date'], 'entry': 'Ghi có'} if core_e else None,
+            'core':      {'date': core_e['date'], 'entry': core_entry} if core_e else None,
             'napas':     napas_dict,
             'recon_status': rs,
             'resolved_by': None, 'resolved_at': None, 'note': None,
@@ -188,9 +195,16 @@ def _build_from_db() -> list[dict]:
         st          = _swift_status(str(d.get('phản_hồi') or ''))
         day         = txn_date or swift_date or ''
 
-        core_e = core_deb.get(seq) if seq else None
+        # Thử GHI NỢ trước, fallback sang GHI CÓ
+        core_e      = core_deb.get(seq) if seq else None
+        core_entry  = 'Ghi nợ'
         if core_e and core_e['amount'] != amt:
             core_e = None
+        if core_e is None:
+            core_e = core_cred.get(seq) if seq else None
+            core_entry = 'Ghi có'
+            if core_e and core_e['amount'] != amt:
+                core_e = None
 
         n_tc = napas_den.get(trace) if trace else None
         if n_tc and n_tc['amount'] != amt:
@@ -217,7 +231,7 @@ def _build_from_db() -> list[dict]:
             'amount':    amt,
             'day':       day,
             'swift':     {'date': swift_date, 'txnDate': txn_date, 'status': st},
-            'core':      {'date': core_e['date'], 'entry': 'Ghi nợ'} if core_e else None,
+            'core':      {'date': core_e['date'], 'entry': core_entry} if core_e else None,
             'napas':     napas_dict,
             'recon_status': rs,
             'resolved_by': None, 'resolved_at': None, 'note': None,
