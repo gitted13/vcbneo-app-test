@@ -7,7 +7,7 @@ const NAV_GROUPS = [
   {
     label: 'DASHBOARD',
     items: [
-      { to: '/reports',  label: 'Dashboard',   icon: DashboardIcon, roles: ['Admin', 'Operator', 'Viewer'] },
+      { to: '/dashboard', label: 'Dashboard',   icon: DashboardIcon, roles: ['Admin', 'Operator', 'Viewer'] },
       { to: '/chatbot',  label: 'Trợ lý AI',   icon: ChatbotIcon,   roles: ['Admin', 'Operator', 'Viewer'] },
     ],
   },

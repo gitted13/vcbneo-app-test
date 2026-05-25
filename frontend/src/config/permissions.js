@@ -119,11 +119,6 @@ export function canAccess(role, moduleKey) {
 }
 
 /** Returns the default landing route for `role` after login. */
-export function homeRoute(role) {
-  for (const group of MODULE_DEFS) {
-    for (const item of group.items) {
-      if (item.homeFor?.includes(role)) return item.route
-    }
-  }
-  return '/storage'
+export function homeRoute(_role) {
+  return '/dashboard'
 }

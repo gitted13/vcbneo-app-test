@@ -139,5 +139,9 @@ export const api = {
       fd.append('file', file)
       return request('/flex/scan-file', { method: 'POST', body: fd })
     },
+    purge: (typeId = null) => {
+      const params = typeId != null ? `?type_id=${typeId}` : ''
+      return request(`/flex/purge${params}`, { method: 'DELETE' })
+    },
   },
 }

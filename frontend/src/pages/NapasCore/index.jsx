@@ -57,7 +57,7 @@ export default function NapasCore() {
     if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
     return true
   })
-  const unmatchedBase = dateBase.filter(r => !r.core)
+  const unmatchedBase = dateBase.filter(r => !r.core && !r.napas?.failed)
   const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {
@@ -154,8 +154,8 @@ export default function NapasCore() {
       {/* View tab switcher */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, marginBottom: 16 }}>
         {[
-          { key: 'all',       label: 'Tất cả',     count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
-          { key: 'unmatched', label: 'Không khớp', count: unmatchedBase.length, color: '#dc2626', badgeBg: '#fef2f2' },
+          { key: 'all',       label: 'Tất cả',       count: dateBase.length,      color: C.primary, badgeBg: '#eff6ff' },
+          { key: 'unmatched', label: 'Chỉ NAPAS TC', count: unmatchedBase.length, color: '#d97706', badgeBg: '#fffbeb' },
         ].map(t => {
           const active = activeView === t.key
           return (
@@ -180,16 +180,14 @@ export default function NapasCore() {
 
       {activeView === 'all' && <KpiBar items={kpiItems} />}
       {activeView === 'unmatched' && (
-        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#dc2626', fontWeight: 700 }}>!</span>
+        <div style={{ marginBottom: 16, padding: '10px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1, flexShrink: 0, color: '#d97706', fontWeight: 700 }}>!</span>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>
-              {unmatchedBase.length} giao dịch NAPAS không tìm được đối ứng bên Core GL
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e' }}>
+              {unmatchedBase.length} giao dịch NAPAS TC {dir} không có đối ứng bên Core GL — trạng thái "Chỉ NAPAS TC"
             </div>
-            <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-              {dir === 'Đi'
-                ? 'Bao gồm các giao dịch NAPAS KTC (không thành công) và GD thành công nhưng chưa ghi nhận bên Core.'
-                : 'Các giao dịch NAPAS Đến TC không có đối ứng Core — trạng thái "Core không ghi nhận", cần kiểm tra thủ công.'}
+            <div style={{ fontSize: 11, color: '#78350f', marginTop: 2 }}>
+              Đây là trường hợp đã được định nghĩa: NAPAS ghi nhận thành công (TC) nhưng Core GL chưa có bút toán tương ứng. Giao dịch KTC (không thành công) được phân loại riêng trong bảng phân loại trạng thái.
             </div>
           </div>
         </div>

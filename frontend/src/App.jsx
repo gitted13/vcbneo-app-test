@@ -19,6 +19,7 @@ import NapasCore        from './pages/NapasCore'
 import CoreSummary      from './pages/CoreSummary'
 import DateRules        from './pages/DateRules'
 import Chatbot          from './pages/Chatbot'
+import Dashboard        from './pages/Dashboard'
 
 function RequireAuth({ children }) {
   const { user } = useAuth()
@@ -49,6 +50,7 @@ export default function App() {
             <Layout>
               <Routes>
                 <Route path="/"              element={<HomeRedirect />} />
+                <Route path="/dashboard"     element={<Dashboard />} />
                 <Route path="/file-settings" element={<RequireRole roles={['Admin']}><FileTypeSettings /></RequireRole>} />
                 <Route path="/data-input"    element={<RequireRole roles={['Admin', 'Operator']}><DataInput /></RequireRole>} />
                 <Route path="/storage"       element={<DataStorage />} />

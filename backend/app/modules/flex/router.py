@@ -154,6 +154,48 @@ def list_files(type_id: int | None = Query(None)) -> list[dict]:
 
 # ── File management ───────────────────────────────────────────────────────────
 
+@router.delete("/purge", status_code=200)
+def purge_uploaded_data(type_id: int | None = None):
+    """Hard-delete dữ liệu thô đã tải lên khỏi 3 bảng: uploadedFileRows, uploadedFiles, reconcileResults.
+    - type_id truyền vào: chỉ xóa dữ liệu của loại file đó.
+    - Không truyền type_id: xóa TOÀN BỘ dữ liệu upload và kết quả đối soát.
+    """
+    with db_cursor() as cur:
+        if type_id is not None:
+            cur.execute("SELECT id FROM uploadedTypes WHERE id = ? AND is_active = 1", type_id)
+            if not cur.fetchone():
+                raise HTTPException(404, f"type_id={type_id} không tồn tại")
+            cur.execute(
+                "DELETE FROM uploadedFileRows WHERE file_id IN (SELECT id FROM uploadedFiles WHERE upload_type_id = ?)",
+                type_id,
+            )
+            rows_deleted = cur.rowcount
+            cur.execute("DELETE FROM uploadedFiles WHERE upload_type_id = ?", type_id)
+            files_deleted = cur.rowcount
+            cur.execute(
+                "DELETE FROM reconcileResults WHERE left_type_id = ? OR right_type_id = ?",
+                type_id, type_id,
+            )
+            results_deleted = cur.rowcount
+        else:
+            cur.execute("DELETE FROM uploadedFileRows")
+            rows_deleted = cur.rowcount
+            cur.execute("DELETE FROM uploadedFiles")
+            files_deleted = cur.rowcount
+            cur.execute("DELETE FROM reconcileResults")
+            results_deleted = cur.rowcount
+    mark_stale_all()
+    return {
+        "ok": True,
+        "type_id": type_id,
+        "deleted": {
+            "uploadedFileRows": rows_deleted,
+            "uploadedFiles": files_deleted,
+            "reconcileResults": results_deleted,
+        },
+    }
+
+
 @router.delete("/files/{file_id}", status_code=200)
 def delete_file(file_id: int):
     """Soft-delete an uploaded file (set is_active=0). Rows are kept but excluded from all queries."""

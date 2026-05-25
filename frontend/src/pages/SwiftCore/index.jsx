@@ -185,7 +185,7 @@ export default function SwiftCore() {
               {unmatchedBase.length} giao dịch Swift không tìm được đối ứng bên Core GL
             </div>
             <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-              Các giao dịch này có trạng thái Chỉ Swift hoặc Swift timeout — cần kiểm tra thủ công từng trường hợp. Giao dịch Swift thất bại và NAPAS thất bại được ghi nhận riêng ở khu vực thất bại.
+              Không khớp chỉ xảy ra khi dữ liệu không tồn tại — giao dịch Swift THÀNH CÔNG nhưng Core GL không có bản ghi tương ứng. Các trường hợp thất bại (Swift thất bại, Swift timeout) được ghi nhận riêng ở các cột phân loại tương ứng.
             </div>
           </div>
         </div>
