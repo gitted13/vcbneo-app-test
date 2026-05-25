@@ -57,7 +57,7 @@ export default function SwiftCore() {
     if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
     return true
   })
-  const unmatchedBase = dateBase.filter(r => !r.core)
+  const unmatchedBase = dateBase.filter(r => !r.core && r.swift?.status !== 'THAT_BAI' && r.recon_status !== 'NAPAS_THAT_BAI')
   const viewBase      = activeView === 'unmatched' ? unmatchedBase : dateBase
 
   const filtered = viewBase.filter(r => {
@@ -185,7 +185,7 @@ export default function SwiftCore() {
               {unmatchedBase.length} giao dịch Swift không tìm được đối ứng bên Core GL
             </div>
             <div style={{ fontSize: 11, color: '#9b1c1c', marginTop: 2 }}>
-              Các giao dịch này có trạng thái Chỉ Swift, Swift timeout hoặc Swift thất bại — cần kiểm tra thủ công từng trường hợp.
+              Các giao dịch này có trạng thái Chỉ Swift hoặc Swift timeout — cần kiểm tra thủ công từng trường hợp. Giao dịch Swift thất bại và NAPAS thất bại được ghi nhận riêng ở khu vực thất bại.
             </div>
           </div>
         </div>

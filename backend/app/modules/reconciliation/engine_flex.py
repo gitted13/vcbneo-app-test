@@ -27,10 +27,12 @@ _SOURCE_TYPE_CODE: dict[tuple[str, str], str] = {
     ("Core",  "Cả hai"): "core_banking",
 }
 
-# Core has one type for both directions; filter by which amount field is non-zero
+# Core has one type for both directions; filter by which amount field is non-zero.
+# Confirmed from data: NAPAS Đi transactions appear as ghi_có (credit) in Core;
+# NAPAS Đến transactions appear as ghi_nợ (debit) in Core.
 _ROW_FILTER: dict[tuple[str, str], Callable[[dict], bool]] = {
-    ("Core", "Đi"):  lambda d: bool(d.get("số_tiền_ghi_nợ")),
-    ("Core", "Đến"): lambda d: bool(d.get("số_tiền_ghi_có")),
+    ("Core", "Đi"):  lambda d: bool(d.get("số_tiền_ghi_có")),
+    ("Core", "Đến"): lambda d: bool(d.get("số_tiền_ghi_nợ")),
 }
 
 

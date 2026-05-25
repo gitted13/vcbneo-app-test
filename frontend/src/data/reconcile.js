@@ -51,26 +51,29 @@ const ymd = s => s.split('/').reverse().join('')  // 'DD/MM/YYYY' → 'YYYYMMDD'
    • Core:       T = core.date; NAPAS/Swift so sánh tương đối
    • NAPAS không có timeout — chỉ TC (failed=false) và KTC (failed=true)   ──── */
 
-/* Swift ↔ Core chiều Đi — 6 cơ bản (TC/TO/TB × T/T+1) + Chỉ Swift
+/* Swift ↔ Core chiều Đi — TC/TO × T/T+1 + Thất bại (không yêu cầu Core) + NAPAS KTC + Chỉ Swift
    T = ngày GD thực tế (txnDate); T+1 = Core ghi nhận ngày tiếp theo (isT1) */
 export const SWIFT_COLS_DI = [
   { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && !isT1(r) && !!r.core },
   { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && isT1(r)  && !!r.core },
   { label: 'Timeout – Core ngày T',       color:'#d97706', bg:'#fffbeb', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && !isT1(r) && !!r.core },
   { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
-  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) && !!r.core },
-  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  && !!r.core },
-  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core },
+  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
+  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  },
+  { label: 'NAPAS thất bại (KTC)',         color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe', filterFn: r => r.recon_status === 'NAPAS_THAT_BAI' },
+  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => r.recon_status === 'CHI_SWIFT' },
 ]
 
-/* Swift ↔ Core chiều Đến — 6 trạng thái cơ bản (không có "Chỉ Swift" vì Swift là gốc) */
+/* Swift ↔ Core chiều Đến — TC/TO × T/T+1 + Thất bại (không yêu cầu Core) + NAPAS KTC + Chỉ Swift */
 export const SWIFT_COLS_DEN = [
   { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && !isT1(r) && !!r.core },
   { label: 'Thành công – Core ngày T+1',  color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && isT1(r)  && !!r.core },
   { label: 'Timeout – Core ngày T',       color:'#d97706', bg:'#fffbeb', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && !isT1(r) && !!r.core },
   { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
-  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) && !!r.core },
-  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  && !!r.core },
+  { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
+  { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  },
+  { label: 'NAPAS thất bại (KTC)',         color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe', filterFn: r => r.recon_status === 'NAPAS_THAT_BAI' },
+  { label: 'Chỉ Swift',                   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => r.recon_status === 'CHI_SWIFT' },
 ]
 
 /* CoreSummary Ghi có — Core là gốc (T), Swift và NAPAS so sánh tương đối */
