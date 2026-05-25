@@ -84,12 +84,11 @@ export const CORE_COLS_DI = [
     filterFn: r => !!r.core && !!r.swift && !!r.napas && r.swift.date === r.core.date && r.napas.date === r.core.date },
   { label: 'Swift ngày T – NAPAS ngày T+1',        color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
     filterFn: r => !!r.core && !!r.swift && !!r.napas && r.swift.date === r.core.date && ymd(r.napas.date) > ymd(r.core.date) },
-  { label: 'Chỉ có Swift – không có NAPAS',        color:'#d97706', bg:'#fffbeb', border:'#fde68a',
+  { label: 'Thất bại – không có trên NAPAS',       color:'#d97706', bg:'#fffbeb', border:'#fde68a',
     filterFn: r => !!r.core && !!r.swift && !r.napas },
 ]
 
-/* CoreSummary Ghi nợ — Core là gốc (T), NAPAS so sánh tương đối.
-   "Chỉ có Swift – không có NAPAS" = Core + Swift khớp nhưng không có NAPAS — GD hợp lệ, truy vết được qua Swift. */
+/* CoreSummary Ghi nợ — Core là gốc (T), NAPAS so sánh tương đối. */
 export const CORE_COLS_DEN = [
   { label: 'Core ngày T – NAPAS ngày T-1',         color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
     filterFn: r => !!r.core && !!r.napas && ymd(r.napas.date) < ymd(r.core.date) },
@@ -97,7 +96,7 @@ export const CORE_COLS_DEN = [
     filterFn: r => !!r.core && !!r.napas && r.napas.date === r.core.date },
   { label: 'Core ngày T – NAPAS ngày T+1',          color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
     filterFn: r => !!r.core && !!r.napas && ymd(r.napas.date) > ymd(r.core.date) },
-  { label: 'Chỉ có Swift – không có NAPAS',         color:'#d97706', bg:'#fffbeb', border:'#fde68a',
+  { label: 'Core có – không có NAPAS',              color:'#d97706', bg:'#fffbeb', border:'#fde68a',
     filterFn: r => !!r.core && !!r.swift && !r.napas },
 ]
 
