@@ -22,27 +22,30 @@ _JOIN_CONFIGS = [
         ],
     },
     {
+        # Đi = ghi có (credit) per _ROW_FILTER in engine_flex.py và data flow
+        # "Swift đi → NAPAS đi TC → Core Ghi có" (docs/handover.md).
         "name": "Swift vs Core", "leftSource": "Swift", "rightSource": "Core",
         "direction": "Đi", "joinType": "left",
-        "matchFields": [
-            {"left": "seq",     "right": "sequence"},
-            {"left": "số_tiền", "right": "số_tiền_ghi_nợ"},
-        ],
-    },
-    {
-        "name": "Swift vs Core", "leftSource": "Swift", "rightSource": "Core",
-        "direction": "Đến", "joinType": "left",
         "matchFields": [
             {"left": "seq",     "right": "sequence"},
             {"left": "số_tiền", "right": "số_tiền_ghi_có"},
         ],
     },
     {
+        # Đến = ghi nợ (debit) — "Core Ghi nợ → NAPAS đến TC → Swift đến".
+        "name": "Swift vs Core", "leftSource": "Swift", "rightSource": "Core",
+        "direction": "Đến", "joinType": "left",
+        "matchFields": [
+            {"left": "seq",     "right": "sequence"},
+            {"left": "số_tiền", "right": "số_tiền_ghi_nợ"},
+        ],
+    },
+    {
         "name": "Core vs NAPAS", "leftSource": "Core", "rightSource": "NAPAS",
         "direction": "Đi", "joinType": "left",
         "matchFields": [
             {"left": "trace",           "right": "số_trace"},
-            {"left": "số_tiền_ghi_nợ", "right": "số_tiền"},
+            {"left": "số_tiền_ghi_có", "right": "số_tiền"},
         ],
     },
     {
@@ -50,7 +53,7 @@ _JOIN_CONFIGS = [
         "direction": "Đến", "joinType": "left",
         "matchFields": [
             {"left": "trace",           "right": "số_trace"},
-            {"left": "số_tiền_ghi_có", "right": "số_tiền"},
+            {"left": "số_tiền_ghi_nợ", "right": "số_tiền"},
         ],
     },
 ]
@@ -193,7 +196,7 @@ TYPES = [
         "upload_name": "Napas đi",
         "fields_schema": {
             "type_code": "napas_di", "description": "",
-            "unique_key": ["số_trace", "ngày_gd"],
+            "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Số tài khoản/Số thẻ", "field_name": "số_tài_khoản/số_thẻ",   "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "Số tiền",              "field_name": "số_tiền",                "data_type": "number",  "required": True,  "allowed_values": [], "note": ""},
@@ -215,7 +218,7 @@ TYPES = [
         "upload_name": "Napas đến",
         "fields_schema": {
             "type_code": "napas_den", "description": "",
-            "unique_key": ["số_trace", "ngày_gd"],
+            "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Mã GD",               "field_name": "mã_gd",                "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "Số tài khoản chuyển", "field_name": "số_tài_khoản_chuyển",  "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
@@ -236,7 +239,7 @@ TYPES = [
         "upload_name": "Napas đi không thành công",
         "fields_schema": {
             "type_code": "napas_di_ktc", "description": "",
-            "unique_key": ["số_trace", "ngày_gd"],
+            "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Mã GD",          "field_name": "mã_gd",          "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "Số Tài khoản",   "field_name": "số_tài_khoản",   "data_type": "string",  "required": False, "allowed_values": [], "note": ""},

@@ -125,11 +125,17 @@ def _swift_status(st_raw: str) -> str:
 
 def _infer_recon_status(swift_st, core_entry, napas_info, napas_failed, swift_date) -> str:
     if swift_st == 'THAT_BAI':
-        return 'SWIFT_THAT_BAI'
+        # Swift AND (usually) NAPAS both say this failed — but if Core has a
+        # matching entry anyway, money may have posted despite both failure
+        # reports. That's a real anomaly, not a normal cancelled transaction.
+        return 'SWIFT_THAT_BAI_CO_CORE' if core_entry else 'SWIFT_THAT_BAI'
     if swift_st == 'TIMEOUT' and not core_entry:
         return 'SWIFT_TIMEOUT'
     if napas_failed and swift_st == 'THANH_CONG':
-        return 'NAPAS_THAT_BAI'
+        # NAPAS reports KTC (failed) — normally Core has no matching entry.
+        # If Core DOES have one anyway, that's a contradiction worth its own
+        # status: money may have posted despite NAPAS reporting failure.
+        return 'NAPAS_THAT_BAI_CO_CORE' if core_entry else 'NAPAS_THAT_BAI'
     if swift_st == 'TIMEOUT' and core_entry:
         return 'TIMEOUT_CO_CORE'
     if not core_entry and not napas_info and swift_st == 'THANH_CONG':

@@ -12,6 +12,19 @@ from app.modules.reconciliation.rows_builder import (
 )
 
 
+def _teller_key(raw) -> str | None:
+    """Normalize teller code (strip leading zeros so '0088' == 88)."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        return str(int(float(s)))
+    except (ValueError, TypeError):
+        return s
+
+
 def _parse_db_date(raw) -> str | None:
     """Convert any date format stored in DB to 'DD/MM/YYYY'."""
     if raw is None:
@@ -73,10 +86,11 @@ def _build_from_db() -> list[dict]:
     # ── Build NAPAS indexes (keyed by số_trace) ────────────────────────────────
     def _napas_entry(d, failed):
         return {
-            'amount':   _to_int(d.get('số_tiền')) or 0,
-            'raw_ngay': d.get('ngày_gd'),
-            'time':     _napas_time_fmt(d.get('giờ_gd')) if d.get('giờ_gd') is not None else None,
-            'failed':   failed,
+            'amount':    _to_int(d.get('số_tiền')) or 0,
+            'raw_ngay':  d.get('ngày_gd'),
+            'time':      _napas_time_fmt(d.get('giờ_gd')) if d.get('giờ_gd') is not None else None,
+            'failed':    failed,
+            'sheet_day': d.get('_sheet_day'),
         }
 
     napas_di: dict[str, dict] = {}
@@ -97,9 +111,22 @@ def _build_from_db() -> list[dict]:
         if trace:
             napas_ktc[trace] = _napas_entry(r['data'], True)
 
-    # ── Build Core indexes (keyed by sequence) ─────────────────────────────────
-    core_cred: dict[str, dict] = {}   # credit (ghi có) — matches Swift DI
-    core_deb:  dict[str, dict] = {}   # debit  (ghi nợ) — matches Swift DEN
+    # ── Build Core indexes ──────────────────────────────────────────────────────
+    # Keyed primarily by composite (teller, seq) — per ADR-006, plain `seq` resets
+    # per shift/teller and collides across days (confirmed: 5 real collisions in
+    # production data, e.g. seq=1063 exists on both 02/02 and 03/02 with different
+    # tellers). A plain-seq fallback is kept only for sequences that are
+    # unambiguous across the whole file, so rows with a missing teller still
+    # match safely. Deliberately NOT keyed by date — Core is always day T while
+    # Swift can be T or T+1 (ADR-003/4.4), so requiring exact date equality here
+    # would break the intentional KHOP_LECH_NGAY day-offset tolerance.
+    core_cred: dict = {}   # credit (ghi có) — matches Swift DI
+    core_deb:  dict = {}   # debit  (ghi nợ) — matches Swift DEN
+
+    _core_credit_rows: list[tuple[str, str | None, dict]] = []
+    _core_debit_rows:  list[tuple[str, str | None, dict]] = []
+    _seq_tellers_cred: dict[str, set] = {}
+    _seq_tellers_deb:  dict[str, set] = {}
 
     for r in core_rows:
         d = r['data']
@@ -109,12 +136,39 @@ def _build_from_db() -> list[dict]:
         core_dt = _parse_db_date(d.get('ngày_giao_dịch'))
         if not core_dt:
             continue
+        teller = _teller_key(d.get('teller'))
         credit = _to_int(d.get('số_tiền_ghi_có')) or 0
         debit  = _to_int(d.get('số_tiền_ghi_nợ')) or 0
+
         if credit > 0:
-            core_cred[seq] = {'amount': credit, 'date': core_dt}
+            entry = {'amount': credit, 'date': core_dt}
+            _core_credit_rows.append((seq, teller, entry))
+            _seq_tellers_cred.setdefault(seq, set()).add(teller)
         elif debit > 0:
-            core_deb[seq] = {'amount': debit, 'date': core_dt}
+            entry = {'amount': debit, 'date': core_dt}
+            _core_debit_rows.append((seq, teller, entry))
+            _seq_tellers_deb.setdefault(seq, set()).add(teller)
+
+    for seq, teller, entry in _core_credit_rows:
+        if teller:
+            core_cred[(teller, seq)] = entry
+        if len(_seq_tellers_cred.get(seq, ())) <= 1:
+            core_cred[seq] = entry
+
+    for seq, teller, entry in _core_debit_rows:
+        if teller:
+            core_deb[(teller, seq)] = entry
+        if len(_seq_tellers_deb.get(seq, ())) <= 1:
+            core_deb[seq] = entry
+
+    def _core_lookup(index: dict, seq: str | None, teller: str | None) -> dict | None:
+        if not seq:
+            return None
+        if teller:
+            hit = index.get((teller, seq))
+            if hit is not None:
+                return hit
+        return index.get(seq)
 
     # ── Build unified rows anchored on Swift ───────────────────────────────────
     rows: list[dict] = []
@@ -132,15 +186,20 @@ def _build_from_db() -> list[dict]:
         txn_date, _ = _parse_swift_di_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('hostdate')) or txn_date
         st          = _swift_status(str(d.get('phản_hồi') or ''))
-        day         = txn_date or swift_date or ''
+        # "day" (which day-bucket/tab this row is counted under) is anchored on
+        # the file's own export sheet when known — not the row's embedded date,
+        # which stays untouched below (swift_date/txn_date) and still drives
+        # T-1/T/T+1 offset classification via _infer_recon_status.
+        day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
         # Thử GHI CÓ trước, fallback sang GHI NỢ — Core có thể dùng bút toán nào cũng được
-        core_e      = core_cred.get(seq) if seq else None
+        teller_k    = _teller_key(d.get('teller'))
+        core_e      = _core_lookup(core_cred, seq, teller_k)
         core_entry  = 'Ghi có'
         if core_e and core_e['amount'] != amt:
             core_e = None
         if core_e is None:
-            core_e = core_deb.get(seq) if seq else None
+            core_e = _core_lookup(core_deb, seq, teller_k)
             core_entry = 'Ghi nợ'
             if core_e and core_e['amount'] != amt:
                 core_e = None
@@ -150,8 +209,14 @@ def _build_from_db() -> list[dict]:
         if n_tc and n_tc['amount'] != amt:
             n_tc = None
         if st == 'THAT_BAI':
-            core_e = None
-            n_tc   = None
+            # Don't discard a genuine Core match just because Swift/NAPAS both
+            # reported failure — if Core actually posted the money anyway,
+            # that's a real anomaly that must stay visible (see
+            # NAPAS_THAT_BAI_CO_CORE / SWIFT_THAT_BAI_CO_CORE below), not be
+            # silently hidden. Only the (unrelated) TC-file napas match is
+            # discarded, since a failed Swift transaction shouldn't be
+            # attributed to a coincidentally-matching successful NAPAS entry.
+            n_tc = None
 
         n_info = napas_ktc.get(trace) if is_ktc else n_tc
         napas_dict = None
@@ -191,15 +256,16 @@ def _build_from_db() -> list[dict]:
         txn_date, _ = _parse_swift_den_time(d.get('thời_gian')) if d.get('thời_gian') else (None, None)
         swift_date  = _parse_db_date(d.get('host_date')) or txn_date
         st          = _swift_status(str(d.get('phản_hồi') or ''))
-        day         = txn_date or swift_date or ''
+        day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
         # Thử GHI NỢ trước, fallback sang GHI CÓ
-        core_e      = core_deb.get(seq) if seq else None
+        teller_k    = _teller_key(d.get('teller'))
+        core_e      = _core_lookup(core_deb, seq, teller_k)
         core_entry  = 'Ghi nợ'
         if core_e and core_e['amount'] != amt:
             core_e = None
         if core_e is None:
-            core_e = core_cred.get(seq) if seq else None
+            core_e = _core_lookup(core_cred, seq, teller_k)
             core_entry = 'Ghi có'
             if core_e and core_e['amount'] != amt:
                 core_e = None
@@ -234,6 +300,47 @@ def _build_from_db() -> list[dict]:
             'recon_status': rs,
             'resolved_by': None, 'resolved_at': None, 'note': None,
         })
+        rid += 1
+
+    # ── CHI_NAPAS rows — NAPAS entries with no Swift counterpart at all ────────
+    # Per ADR-001 (docs/handover.md): these are valid transactions (NAPAS
+    # confirmed them; Swift/Core just haven't/won't produce a matching record)
+    # and must still appear in the master view, not be silently dropped because
+    # the row-building above only walks Swift.
+    swift_di_traces  = {_to_str(r['data'].get('trace_number')) for r in swift_di_rows  if r['data'].get('trace_number')}
+    swift_den_traces = {_to_str(r['data'].get('trace'))        for r in swift_den_rows if r['data'].get('trace')}
+
+    def _chi_napas_row(trace: str, entry: dict, direction: str) -> dict:
+        n_date, n_type = _napas_date_from_db(entry.get('raw_ngay'), None)
+        day = _parse_db_date(entry.get('sheet_day')) or n_date or ''
+        return {
+            'id':        None,   # filled by caller
+            'trace':     trace.zfill(6),
+            'sequence':  None,
+            'direction': direction,
+            'amount':    entry['amount'],
+            'day':       day,
+            'swift':     None,
+            'core':      None,
+            'napas':     {'date': n_date, 'time': entry.get('time'), 'failed': False, 'type': n_type},
+            'recon_status': 'CHI_NAPAS',
+            'resolved_by': None, 'resolved_at': None, 'note': None,
+        }
+
+    for trace, entry in napas_di.items():
+        if trace in swift_di_traces:
+            continue
+        row = _chi_napas_row(trace, entry, 'Đi')
+        row['id'] = f'r{rid:05d}'
+        rows.append(row)
+        rid += 1
+
+    for trace, entry in napas_den.items():
+        if trace in swift_den_traces:
+            continue
+        row = _chi_napas_row(trace, entry, 'Đến')
+        row['id'] = f'r{rid:05d}'
+        rows.append(row)
         rid += 1
 
     return rows

@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import re
@@ -245,11 +246,17 @@ async def upload_file(
         df_raw = pd.read_excel(BytesIO(contents), sheet_name=sheet_names[0], dtype=str, header=None, nrows=40)
         header_idx = _detect_header_row(df_raw)
 
-        # Đọc tất cả sheet với cùng header_idx rồi concat
+        # Ngày thật của mỗi sheet (theo tên sheet — export từ hệ thống nguồn),
+        # dùng làm "day" gốc thay vì tin ngày nhúng trong từng dòng dữ liệu.
+        sheet_day_map = _build_sheet_day_map(sheet_names)
+
+        # Đọc tất cả sheet với cùng header_idx rồi concat, giữ lại tên sheet gốc
+        # của mỗi dòng (cột nội bộ, không map theo schema) để tra sheet_day_map.
         dfs = []
         for sheet in sheet_names:
             try:
                 df_sheet = pd.read_excel(BytesIO(contents), sheet_name=sheet, dtype=str, header=header_idx)
+                df_sheet["__sheet__"] = sheet
                 dfs.append(df_sheet)
             except Exception:
                 pass
@@ -306,6 +313,10 @@ async def upload_file(
                 errors.append({"row": excel_row_num, "field": field_name,
                                "reason": f"Giá trị '{raw_val}' không hợp lệ. Cho phép: {', '.join(av)}"})
             row_json[field_name] = parsed
+
+        sheet_day = sheet_day_map.get(excel_row.get("__sheet__"))
+        if sheet_day:
+            row_json["_sheet_day"] = sheet_day
         rows_data.append(row_json)
 
     # 4. Persist to DB — one row per transaction
@@ -464,6 +475,91 @@ def _row_key(type_id: int, unique_key: list[str], row: dict) -> str | None:
     parts = [str(row.get(k) or "") for k in unique_key]
     raw = f"{type_id}:" + "|".join(parts)
     return hashlib.md5(raw.encode()).hexdigest()
+
+
+# ── Sheet-day parsing ─────────────────────────────────────────────────────────
+# Excel sheets are named by the source system's export day (the "true" business
+# day for every row in that sheet) — not to be confused with each row's own
+# embedded date/time field, which stays untouched and still drives T-1/T/T+1
+# offset classification in the reconcile engine. Recognized patterns, seen in
+# real VCB export files:
+#   'DD.MM'          — Swift, Core                (no year in the name)
+#   'MMDDYY_...'     — NAPAS TC files              (year embedded)
+#   'MMDD'           — NAPAS KTC, later sheets      (no year in the name)
+# Sheets that don't match any pattern are left unresolved — rows from them fall
+# back to today's behavior (day derived from the row's own date field).
+
+_SHEET_DAY_DOTTED = re.compile(r"^(\d{2})\.(\d{2})$")             # DD.MM
+_SHEET_DAY_YEARED = re.compile(r"^(\d{2})(\d{2})(\d{2})_")        # MMDDYY_...
+_SHEET_DAY_BARE   = re.compile(r"^(\d{2})(\d{2})$")               # MMDD
+
+
+def _valid_mmdd(mm: str, dd: str) -> bool:
+    return 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31
+
+
+def _build_sheet_day_map(sheet_names: list[str]) -> dict[str, str]:
+    """Map sheet name → 'YYYYMMDD' for every sheet whose name encodes a day.
+
+    A first pass finds any sheet with an explicit year (MMDDYY_... pattern) to
+    use as the fallback year for sibling sheets in the same file that encode
+    day/month only (DD.MM or bare MMDD, no year segment).
+    """
+    fallback_year: str | None = None
+    for name in sheet_names:
+        m = _SHEET_DAY_YEARED.match(name.strip())
+        if m:
+            fallback_year = f"20{m.group(3)}"
+            break
+
+    # Swift/Core sheets ('DD.MM') never carry a year anywhere in the file — the
+    # only fallback available is the server's current year at upload time. This
+    # is a best-effort default (wrong only at a year boundary, e.g. uploading a
+    # December file in January) and only used when nothing better is available.
+    if fallback_year is None:
+        fallback_year = str(datetime.date.today().year)
+
+    result: dict[str, str] = {}
+    for name in sheet_names:
+        s = name.strip()
+
+        m = _SHEET_DAY_YEARED.match(s)
+        if m:
+            mm, dd, yy = m.groups()
+            if _valid_mmdd(mm, dd):
+                result[name] = f"20{yy}{mm}{dd}"
+            continue
+
+        m = _SHEET_DAY_DOTTED.match(s)
+        if m and fallback_year:
+            dd, mm = m.groups()
+            if _valid_mmdd(mm, dd):
+                result[name] = f"{fallback_year}{mm}{dd}"
+            continue
+
+        m = _SHEET_DAY_BARE.match(s)
+        if m and fallback_year:
+            # Bare 4-digit sheet names are ambiguous — could be MMDD (matching
+            # the yeared NAPAS sibling sheets) or DDMM (matching Swift/Core's
+            # dotted convention). Try both; only accept when unambiguous:
+            # exactly one ordering is a valid calendar date, or both orderings
+            # agree on the same date. Otherwise leave unresolved rather than
+            # silently guessing wrong (confirmed real case: '0302' is invalid
+            # as neither... both readings are valid dates but disagree — Feb 3
+            # vs March 2 — so it must be left unresolved here).
+            a, b = m.groups()
+            candidates = set()
+            if _valid_mmdd(a, b):
+                candidates.add(f"{fallback_year}{a}{b}")   # read as MMDD
+            if _valid_mmdd(b, a):
+                candidates.add(f"{fallback_year}{b}{a}")   # read as DDMM
+            if len(candidates) == 1:
+                result[name] = candidates.pop()
+            continue
+        # Unrecognized pattern — leave unresolved, caller falls back to
+        # each row's own embedded date field.
+
+    return result
 
 
 # ── Header detection ─────────────────────────────────────────────────────────
