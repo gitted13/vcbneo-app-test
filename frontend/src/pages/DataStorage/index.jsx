@@ -23,6 +23,20 @@ function isNumType(col) {
   return col.data_type === 'number' || col.data_type === 'integer'
 }
 
+// "Giờ GD" (giờ_gd) is stored as an HHMMSS integer (e.g. 92425 = 09:24:25),
+// not a plain quantity — must not fall into the thousands-grouped number
+// formatting below, or it renders as "92.425" instead of a time.
+function isTimeField(col) {
+  return col.field_name === 'giờ_gd'
+}
+
+function formatTime(val) {
+  const s = String(val ?? '').trim().padStart(6, '0')
+  if (/^\d{6}$/.test(s))
+    return `${s.slice(0, 2)}:${s.slice(2, 4)}:${s.slice(4, 6)}`
+  return s
+}
+
 function isStatusCol(col) {
   return Array.isArray(col.allowed_values) && col.allowed_values.length > 0
 }
@@ -60,6 +74,9 @@ function CellValue({ value, col }) {
 
   if (isDateType(col))
     return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatDate(value)}</span>
+
+  if (isTimeField(col))
+    return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatTime(value)}</span>
 
   if (isNumType(col)) {
     const n = Number(String(value).replace(/,/g, ''))
