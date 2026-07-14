@@ -1,10 +1,23 @@
 """
 Build unified transaction rows from DB (uploadedFileRows).
 Mirrors rows_builder.py logic but reads from DB instead of Excel files.
+
+Join keys (which fields link Swift↔Core↔NAPAS) are read live from
+`reconcileJoinConfigs` (the same table/UI the JoinLogic page edits) instead of
+being hardcoded — editing a config's matchFields there changes matching here on
+the next request, no redeploy needed. Status classification stays Python logic
+(`_infer_recon_status`): its status vocabulary (KHOP/CHI_SWIFT/...CO_CORE) is
+workflow-oriented and intentionally different from the date-offset vocabulary
+`reconcileStatusRules`/DateRules uses for the separate Reconcile page — forcing
+them into one shared rule set would break that page, so classification here
+remains code, only the join keys are config-driven.
 """
 from __future__ import annotations
 
-from app.modules.reconciliation.engine_flex import _get_type_id, _load_rows
+import json
+
+from app.db.connection import db_cursor
+from app.modules.reconciliation.engine_flex import _get_type_id, _load_rows, _make_key
 from app.modules.reconciliation.rows_builder import (
     _to_int, _to_str,
     _napas_time_fmt, _swift_status, _infer_recon_status,
@@ -71,6 +84,43 @@ def _napas_date_from_db(raw, txn_date: str | None) -> tuple[str | None, str]:
         return None, 'GD'
 
 
+# ── Join-config loading (matching keys come from here, not hardcoded) ─────────
+
+def _load_join_field_map() -> dict[tuple[str, str, str], list[dict]]:
+    """(leftSource, rightSource, direction) → matchFields, from reconcileJoinConfigs."""
+    result: dict[tuple[str, str, str], list[dict]] = {}
+    with db_cursor() as cur:
+        cur.execute("SELECT config_json FROM reconcileJoinConfigs WHERE is_active = 1")
+        rows = cur.fetchall()
+    for (config_json,) in rows:
+        try:
+            cfg = json.loads(config_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        key = (cfg.get("leftSource", ""), cfg.get("rightSource", ""), cfg.get("direction", ""))
+        result[key] = cfg.get("matchFields") or []
+    return result
+
+
+def _build_match_index(rows: list[dict], match_fields: list[dict]) -> dict[tuple, dict]:
+    """Index raw row data by its configured composite match key (right side).
+
+    Rows whose key has any missing component are skipped — a partial key would
+    risk matching another row that's *also* missing the same field via a
+    coincidental None==None tuple match, which is worse than just not matching.
+    """
+    idx: dict[tuple, dict] = {}
+    if not match_fields:
+        return idx
+    for r in rows:
+        d = r['data']
+        key = _make_key(d, match_fields, "right")
+        if any(p is None for p in key):
+            continue
+        idx[key] = d
+    return idx
+
+
 def _build_from_db() -> list[dict]:
     def load(type_code, row_filter=None):
         tid = _get_type_id(type_code)
@@ -83,7 +133,13 @@ def _build_from_db() -> list[dict]:
     napas_den_rows = load('napas_den')
     napas_ktc_rows = load('napas_di_ktc')
 
-    # ── Build NAPAS indexes (keyed by số_trace) ────────────────────────────────
+    fields = _load_join_field_map()
+    napas_di_fields  = fields.get(("Swift", "NAPAS", "Đi"), [])
+    napas_den_fields = fields.get(("Swift", "NAPAS", "Đến"), [])
+    core_di_fields   = fields.get(("Swift", "Core", "Đi"), [])
+    core_den_fields  = fields.get(("Swift", "Core", "Đến"), [])
+
+    # ── NAPAS: trace-only lookup for display/orphan-enumeration purposes ──────
     def _napas_entry(d, failed):
         return {
             'amount':    _to_int(d.get('số_tiền')) or 0,
@@ -93,82 +149,39 @@ def _build_from_db() -> list[dict]:
             'sheet_day': d.get('_sheet_day'),
         }
 
-    napas_di: dict[str, dict] = {}
+    napas_di_by_trace: dict[str, dict] = {}
     for r in napas_di_rows:
         trace = _to_str(r['data'].get('số_trace'))
         if trace:
-            napas_di[trace] = _napas_entry(r['data'], False)
+            napas_di_by_trace[trace] = _napas_entry(r['data'], False)
 
-    napas_den: dict[str, dict] = {}
+    napas_den_by_trace: dict[str, dict] = {}
     for r in napas_den_rows:
         trace = _to_str(r['data'].get('số_trace'))
         if trace:
-            napas_den[trace] = _napas_entry(r['data'], False)
+            napas_den_by_trace[trace] = _napas_entry(r['data'], False)
 
-    napas_ktc: dict[str, dict] = {}
+    napas_ktc_by_trace: dict[str, dict] = {}
     for r in napas_ktc_rows:
         trace = _to_str(r['data'].get('số_trace'))
         if trace:
-            napas_ktc[trace] = _napas_entry(r['data'], True)
+            napas_ktc_by_trace[trace] = _napas_entry(r['data'], True)
 
-    # ── Build Core indexes ──────────────────────────────────────────────────────
-    # Keyed primarily by composite (teller, seq) — per ADR-006, plain `seq` resets
-    # per shift/teller and collides across days (confirmed: 5 real collisions in
-    # production data, e.g. seq=1063 exists on both 02/02 and 03/02 with different
-    # tellers). A plain-seq fallback is kept only for sequences that are
-    # unambiguous across the whole file, so rows with a missing teller still
-    # match safely. Deliberately NOT keyed by date — Core is always day T while
-    # Swift can be T or T+1 (ADR-003/4.4), so requiring exact date equality here
-    # would break the intentional KHOP_LECH_NGAY day-offset tolerance.
-    core_cred: dict = {}   # credit (ghi có) — matches Swift DI
-    core_deb:  dict = {}   # debit  (ghi nợ) — matches Swift DEN
+    # ── Composite match indices, keyed by each pair's configured matchFields ──
+    # (replaces the old hardcoded seq/teller/trace dict-building — editing a
+    # config's matchFields via JoinLogic changes this on the next request)
+    napas_di_match  = _build_match_index(napas_di_rows, napas_di_fields)
+    napas_den_match = _build_match_index(napas_den_rows, napas_den_fields)
+    core_cred_match = _build_match_index(
+        [r for r in core_rows if _to_int(r['data'].get('số_tiền_ghi_có'))], core_di_fields,
+    )
+    core_deb_match = _build_match_index(
+        [r for r in core_rows if _to_int(r['data'].get('số_tiền_ghi_nợ'))], core_den_fields,
+    )
 
-    _core_credit_rows: list[tuple[str, str | None, dict]] = []
-    _core_debit_rows:  list[tuple[str, str | None, dict]] = []
-    _seq_tellers_cred: dict[str, set] = {}
-    _seq_tellers_deb:  dict[str, set] = {}
-
-    for r in core_rows:
-        d = r['data']
-        seq = _to_str(d.get('sequence'))
-        if not seq:
-            continue
-        core_dt = _parse_db_date(d.get('ngày_giao_dịch'))
-        if not core_dt:
-            continue
-        teller = _teller_key(d.get('teller'))
-        credit = _to_int(d.get('số_tiền_ghi_có')) or 0
-        debit  = _to_int(d.get('số_tiền_ghi_nợ')) or 0
-
-        if credit > 0:
-            entry = {'amount': credit, 'date': core_dt}
-            _core_credit_rows.append((seq, teller, entry))
-            _seq_tellers_cred.setdefault(seq, set()).add(teller)
-        elif debit > 0:
-            entry = {'amount': debit, 'date': core_dt}
-            _core_debit_rows.append((seq, teller, entry))
-            _seq_tellers_deb.setdefault(seq, set()).add(teller)
-
-    for seq, teller, entry in _core_credit_rows:
-        if teller:
-            core_cred[(teller, seq)] = entry
-        if len(_seq_tellers_cred.get(seq, ())) <= 1:
-            core_cred[seq] = entry
-
-    for seq, teller, entry in _core_debit_rows:
-        if teller:
-            core_deb[(teller, seq)] = entry
-        if len(_seq_tellers_deb.get(seq, ())) <= 1:
-            core_deb[seq] = entry
-
-    def _core_lookup(index: dict, seq: str | None, teller: str | None) -> dict | None:
-        if not seq:
-            return None
-        if teller:
-            hit = index.get((teller, seq))
-            if hit is not None:
-                return hit
-        return index.get(seq)
+    def _core_entry(d: dict) -> dict:
+        return {'amount': _to_int(d.get('số_tiền_ghi_có')) or _to_int(d.get('số_tiền_ghi_nợ')) or 0,
+                'date': _parse_db_date(d.get('ngày_giao_dịch'))}
 
     # ── Build unified rows anchored on Swift ───────────────────────────────────
     rows: list[dict] = []
@@ -193,21 +206,16 @@ def _build_from_db() -> list[dict]:
         day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
         # Thử GHI CÓ trước, fallback sang GHI NỢ — Core có thể dùng bút toán nào cũng được
-        teller_k    = _teller_key(d.get('teller'))
-        core_e      = _core_lookup(core_cred, seq, teller_k)
-        core_entry  = 'Ghi có'
-        if core_e and core_e['amount'] != amt:
-            core_e = None
-        if core_e is None:
-            core_e = _core_lookup(core_deb, seq, teller_k)
+        core_d = core_cred_match.get(_make_key(d, core_di_fields, "left")) if core_di_fields else None
+        core_entry = 'Ghi có'
+        if core_d is None and core_den_fields:
+            core_d = core_deb_match.get(_make_key(d, core_den_fields, "left"))
             core_entry = 'Ghi nợ'
-            if core_e and core_e['amount'] != amt:
-                core_e = None
+        core_e = _core_entry(core_d) if core_d is not None else None
 
-        is_ktc = bool(trace and trace in napas_ktc)
-        n_tc   = napas_di.get(trace) if trace else None
-        if n_tc and n_tc['amount'] != amt:
-            n_tc = None
+        is_ktc = bool(trace and trace in napas_ktc_by_trace)
+        n_d = napas_di_match.get(_make_key(d, napas_di_fields, "left")) if napas_di_fields else None
+        n_tc = _napas_entry(n_d, False) if n_d is not None else None
         if st == 'THAT_BAI':
             # Don't discard a genuine Core match just because Swift/NAPAS both
             # reported failure — if Core actually posted the money anyway,
@@ -218,7 +226,7 @@ def _build_from_db() -> list[dict]:
             # attributed to a coincidentally-matching successful NAPAS entry.
             n_tc = None
 
-        n_info = napas_ktc.get(trace) if is_ktc else n_tc
+        n_info = napas_ktc_by_trace.get(trace) if is_ktc else n_tc
         napas_dict = None
         if n_info:
             n_date, n_type = _napas_date_from_db(n_info.get('raw_ngay'), txn_date)
@@ -259,20 +267,15 @@ def _build_from_db() -> list[dict]:
         day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
         # Thử GHI NỢ trước, fallback sang GHI CÓ
-        teller_k    = _teller_key(d.get('teller'))
-        core_e      = _core_lookup(core_deb, seq, teller_k)
-        core_entry  = 'Ghi nợ'
-        if core_e and core_e['amount'] != amt:
-            core_e = None
-        if core_e is None:
-            core_e = _core_lookup(core_cred, seq, teller_k)
+        core_d = core_deb_match.get(_make_key(d, core_den_fields, "left")) if core_den_fields else None
+        core_entry = 'Ghi nợ'
+        if core_d is None and core_di_fields:
+            core_d = core_cred_match.get(_make_key(d, core_di_fields, "left"))
             core_entry = 'Ghi có'
-            if core_e and core_e['amount'] != amt:
-                core_e = None
+        core_e = _core_entry(core_d) if core_d is not None else None
 
-        n_tc = napas_den.get(trace) if trace else None
-        if n_tc and n_tc['amount'] != amt:
-            n_tc = None
+        n_d = napas_den_match.get(_make_key(d, napas_den_fields, "left")) if napas_den_fields else None
+        n_tc = _napas_entry(n_d, False) if n_d is not None else None
         if st == 'THAT_BAI':
             core_e = None
             n_tc   = None
@@ -327,7 +330,7 @@ def _build_from_db() -> list[dict]:
             'resolved_by': None, 'resolved_at': None, 'note': None,
         }
 
-    for trace, entry in napas_di.items():
+    for trace, entry in napas_di_by_trace.items():
         if trace in swift_di_traces:
             continue
         row = _chi_napas_row(trace, entry, 'Đi')
@@ -335,7 +338,7 @@ def _build_from_db() -> list[dict]:
         rows.append(row)
         rid += 1
 
-    for trace, entry in napas_den.items():
+    for trace, entry in napas_den_by_trace.items():
         if trace in swift_den_traces:
             continue
         row = _chi_napas_row(trace, entry, 'Đến')

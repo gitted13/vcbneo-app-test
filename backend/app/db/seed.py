@@ -24,10 +24,14 @@ _JOIN_CONFIGS = [
     {
         # Đi = ghi có (credit) per _ROW_FILTER in engine_flex.py và data flow
         # "Swift đi → NAPAS đi TC → Core Ghi có" (docs/handover.md).
+        # teller thêm vào để tránh seq trùng giữa các ngày khác nhau (seq reset
+        # theo ca/teller — xác nhận 5 trường hợp trùng thật trong dữ liệu sản
+        # xuất, vd seq=1063 tồn tại cả ngày 02/02 và 03/02 với teller khác nhau).
         "name": "Swift vs Core", "leftSource": "Swift", "rightSource": "Core",
         "direction": "Đi", "joinType": "left",
         "matchFields": [
             {"left": "seq",     "right": "sequence"},
+            {"left": "teller",  "right": "teller"},
             {"left": "số_tiền", "right": "số_tiền_ghi_có"},
         ],
     },
@@ -37,6 +41,7 @@ _JOIN_CONFIGS = [
         "direction": "Đến", "joinType": "left",
         "matchFields": [
             {"left": "seq",     "right": "sequence"},
+            {"left": "teller",  "right": "teller"},
             {"left": "số_tiền", "right": "số_tiền_ghi_nợ"},
         ],
     },
