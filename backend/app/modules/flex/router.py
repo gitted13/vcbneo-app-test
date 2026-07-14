@@ -9,7 +9,7 @@ import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.db.connection import db_cursor
-from app.modules.reconciliation.engine_flex import mark_stale_by_type
+from app.modules.reconciliation.engine_flex import mark_stale_by_type, clear_type_id_cache
 
 router = APIRouter()
 
@@ -114,6 +114,7 @@ def update_type(type_id: int, body: dict) -> dict:
         cur.execute(f"UPDATE uploadedTypes SET {set_clause} WHERE id = ?", *patch.values(), type_id)
         if cur.rowcount == 0:
             raise HTTPException(404, "Type not found")
+    clear_type_id_cache()
     mark_stale_by_type(type_id)
     return {"ok": True}
 

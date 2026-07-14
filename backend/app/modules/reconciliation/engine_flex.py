@@ -38,7 +38,17 @@ _ROW_FILTER: dict[tuple[str, str], Callable[[dict], bool]] = {
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
+# type_code → type_id barely ever changes (only on a schema edit or
+# activate/deactivate), but every dashboard load was re-querying it 6 times.
+# Cache hits only — a miss (type not found yet) always re-queries, so a type
+# created after this process started is still picked up on its first use.
+_type_id_cache: dict[str, int] = {}
+
+
 def _get_type_id(type_code: str) -> int | None:
+    cached = _type_id_cache.get(type_code)
+    if cached is not None:
+        return cached
     with db_cursor() as cur:
         cur.execute(
             """
@@ -49,7 +59,10 @@ def _get_type_id(type_code: str) -> int | None:
             type_code,
         )
         row = cur.fetchone()
-    return row[0] if row else None
+    result = row[0] if row else None
+    if result is not None:
+        _type_id_cache[type_code] = result
+    return result
 
 
 def _load_rows(
@@ -418,6 +431,13 @@ def _make_result(
 
 
 # ── Stale marking helpers (called from other routers) ─────────────────────────
+
+def clear_type_id_cache() -> None:
+    """Called when a type's schema/is_active changes — type_id resolution may
+    no longer be valid. NOT called on plain file uploads, since a type's id
+    doesn't change just because a new file was added for it."""
+    _type_id_cache.clear()
+
 
 def mark_stale_by_type(type_id: int) -> None:
     """Called when a type schema changes or new file is uploaded for type_id."""

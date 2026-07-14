@@ -2,6 +2,12 @@ import os
 import pyodbc
 from contextlib import contextmanager
 
+# Explicit — this is already pyodbc's default, but Linux/Docker (production)
+# relies on unixODBC's own pooling config, which we can't verify from here.
+# Setting it explicitly costs nothing and guards against a future pyodbc
+# version changing its default.
+pyodbc.pooling = True
+
 _server   = os.getenv("DB_SERVER",   "DESKTOP-HD3AQVG")
 _database = os.getenv("DB_NAME",     "Test_JSONTypeDB")
 _user     = os.getenv("DB_USER",     "")
