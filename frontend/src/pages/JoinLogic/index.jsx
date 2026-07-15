@@ -18,11 +18,32 @@ const toConfig = ({ name, leftSource, rightSource, direction, joinType, matchFie
 
 /*
  * Mỗi rule so khớp được định nghĩa ở cấp nguồn (Swift / Core / NAPAS),
- * không phải subtable. Backend tự map sang bảng cụ thể dựa vào direction:
+ * không phải subtable. Backend tự map sang bảng cụ thể dựa vào direction
+ * (phải khớp CHÍNH XÁC với _SOURCE_TYPE_CODE trong engine_flex.py):
  *   Swift + Đi   → swift_di       Swift + Đến  → swift_den
  *   NAPAS + Đi   → napas_di       NAPAS + Đến  → napas_den
- *   Core  + Đi   → core_ghino     Core  + Đến  → core_ghico
+ *   Core  + Đi / Đến / Cả hai → core_banking (1 bảng dùng chung 2 chiều)
+ * Swift/NAPAS + "Cả hai" KHÔNG có type_code (2 chiều = 2 bảng cột khác
+ * nhau) — backend sẽ không resolve được, tránh chọn tổ hợp này.
  */
+
+const SOURCE_DIRECTION_TYPE_CODE = {
+  'Swift|Đi': 'swift_di',   'Swift|Đến': 'swift_den',
+  'NAPAS|Đi': 'napas_di',   'NAPAS|Đến': 'napas_den',
+  'Core|Đi': 'core_banking', 'Core|Đến': 'core_banking', 'Core|Cả hai': 'core_banking',
+}
+
+function fieldsForSource(types, source, direction) {
+  const typeCode = SOURCE_DIRECTION_TYPE_CODE[`${source}|${direction}`]
+  if (!typeCode) return null
+  const t = types.find(t => t.fields_schema?.type_code === typeCode)
+  if (!t) return null
+  return (t.fields_schema?.columns || []).map(c => ({
+    field_name: c.field_name,
+    label: c.col_name || c.field_name,
+    data_type: c.data_type,
+  }))
+}
 
 const SOURCES = ['Swift', 'Core', 'NAPAS']
 
@@ -103,6 +124,7 @@ export default function JoinLogic() {
   const isViewer = user?.role === 'Viewer'
 
   const [logics, setLogics]     = useState([])
+  const [types, setTypes]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing]   = useState(null)
@@ -112,6 +134,7 @@ export default function JoinLogic() {
       .then(items => setLogics(items.map(toLocal)))
       .catch(() => toast('Không thể tải cấu hình đối chiếu.', 'error'))
       .finally(() => setLoading(false))
+    api.flex.getTypes('reconcile').then(setTypes).catch(() => {})
   }, [])
 
   const openCreate = () => { setEditing(null); setFormOpen(true) }
@@ -198,6 +221,7 @@ export default function JoinLogic() {
         <LogicFormModal
           open={formOpen}
           editing={editing}
+          types={types}
           onClose={() => setFormOpen(false)}
           onSave={(data) => {
             const config = toConfig(data)
@@ -303,7 +327,7 @@ function LogicCard({ item, meta, isAdmin, isViewer, onEdit, onDelete }) {
 }
 
 /* ── Form Modal ──────────────────────────────────────────────────────────────── */
-function LogicFormModal({ open, editing, onClose, onSave }) {
+function LogicFormModal({ open, editing, types, onClose, onSave }) {
   const blank = {
     name: '', leftSource: 'Swift', rightSource: 'NAPAS',
     direction: 'Đi', joinType: 'left',
@@ -314,6 +338,10 @@ function LogicFormModal({ open, editing, onClose, onSave }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const autoName = `${form.leftSource} vs ${form.rightSource}`
+
+  const leftFields  = fieldsForSource(types, form.leftSource, form.direction)
+  const rightFields = fieldsForSource(types, form.rightSource, form.direction)
+  const noSchema = !leftFields || !rightFields
 
   return (
     <Modal open={open} title={editing ? 'Sửa rule so khớp' : 'Tạo rule so khớp mới'} onClose={onClose} onConfirm={() => onSave({ ...form, name: form.name || autoName })} width={580}>
@@ -348,23 +376,64 @@ function LogicFormModal({ open, editing, onClose, onSave }) {
         </FormRow>
       </div>
 
-      <FormRow label="Trường so khớp (trái = phải)" hint="Các cặp trường dùng để ghép giữa 2 nguồn">
-        {form.matchFields.map((mf, i) => (
-          <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-            <Input
-              value={mf.left}
-              onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, left: e.target.value} : f))}
-              placeholder={`Trường ${form.leftSource}`}
-            />
-            <span style={{ color: C.textMuted, flexShrink: 0, fontWeight: 700 }}>=</span>
-            <Input
-              value={mf.right}
-              onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, right: e.target.value} : f))}
-              placeholder={`Trường ${form.rightSource}`}
-            />
-            <button onClick={() => set('matchFields', form.matchFields.filter((_,j) => j!==i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 18 }}>×</button>
+      <FormRow label="Trường so khớp (trái = phải)" hint="Các cặp trường dùng để ghép giữa 2 nguồn — chọn từ cột thực tế đã cấu hình ở Cấu hình loại file">
+        {noSchema && (
+          <div style={{ marginBottom: 8, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, fontSize: 12, color: '#92400e' }}>
+            ⚠ {form.leftSource}/{form.rightSource} chưa hỗ trợ chiều "{form.direction}" ở dạng danh sách cột (mỗi chiều Đi/Đến là 1 loại file/schema riêng). Nhập tên trường thủ công — kiểm tra kỹ chính tả khớp với <b>field_name</b> trong Cấu hình loại file, nếu không rule sẽ không chạy được.
           </div>
-        ))}
+        )}
+        {form.matchFields.map((mf, i) => {
+          const leftCol  = leftFields?.find(c => c.field_name === mf.left)
+          const rightCol = rightFields?.find(c => c.field_name === mf.right)
+          const typeMismatch = leftCol && rightCol && leftCol.data_type !== rightCol.data_type
+          return (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {leftFields ? (
+                  <Select
+                    value={mf.left}
+                    onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, left: e.target.value} : f))}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">-- chọn trường {form.leftSource} --</option>
+                    {leftFields.map(c => <option key={c.field_name} value={c.field_name}>{c.label} ({c.data_type})</option>)}
+                  </Select>
+                ) : (
+                  <Input
+                    value={mf.left}
+                    onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, left: e.target.value} : f))}
+                    placeholder={`Trường ${form.leftSource}`}
+                    style={{ flex: 1 }}
+                  />
+                )}
+                <span style={{ color: C.textMuted, flexShrink: 0, fontWeight: 700 }}>=</span>
+                {rightFields ? (
+                  <Select
+                    value={mf.right}
+                    onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, right: e.target.value} : f))}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">-- chọn trường {form.rightSource} --</option>
+                    {rightFields.map(c => <option key={c.field_name} value={c.field_name}>{c.label} ({c.data_type})</option>)}
+                  </Select>
+                ) : (
+                  <Input
+                    value={mf.right}
+                    onChange={e => set('matchFields', form.matchFields.map((f,j) => j===i ? {...f, right: e.target.value} : f))}
+                    placeholder={`Trường ${form.rightSource}`}
+                    style={{ flex: 1 }}
+                  />
+                )}
+                <button onClick={() => set('matchFields', form.matchFields.filter((_,j) => j!==i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 18, flexShrink: 0 }}>×</button>
+              </div>
+              {typeMismatch && (
+                <div style={{ fontSize: 11, color: '#d97706', marginTop: 3 }}>
+                  ⚠ Kiểu dữ liệu khác nhau: {form.leftSource}.{leftCol.label} là <b>{leftCol.data_type}</b>, {form.rightSource}.{rightCol.label} là <b>{rightCol.data_type}</b> — so khớp vẫn chạy được (so sánh dạng chuỗi) nhưng kiểm tra lại nếu kết quả không như mong đợi.
+                </div>
+              )}
+            </div>
+          )
+        })}
         <button onClick={() => set('matchFields', [...form.matchFields, { left: '', right: '' }])} style={{ background: 'none', border: `1px dashed ${C.primary}`, cursor: 'pointer', color: C.primary, borderRadius: 6, padding: '4px 12px', fontSize: 12 }}>+ Thêm cặp trường</button>
       </FormRow>
 

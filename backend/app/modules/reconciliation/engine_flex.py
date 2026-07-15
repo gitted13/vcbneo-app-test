@@ -11,6 +11,7 @@ Flow:
 
 import datetime
 import json
+import unicodedata
 from typing import Any, Callable
 
 from app.db.connection import db_cursor
@@ -127,6 +128,21 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     "Ngày Swift": ["hostdate", "host_date"],         # Swift posting date
 }
 
+
+def _norm(s: str) -> str:
+    """Diacritic- and case-insensitive key: 'Ngày GD' / 'Ngay GD' / 'ngày gd' all match.
+    reconcileStatusRules rows saved by seed.py use plain-ASCII field names
+    ("Ngay GD") while this module and the DateRules UI use Vietnamese
+    diacritics ("Ngày GD") — without normalizing, every date-comparison
+    chip loaded from a freshly-seeded DB silently resolves to "" and never
+    matches, so day-matched vs day-mismatched statuses can't be told apart.
+    """
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn").strip().lower()
+
+
+_FIELD_ALIASES_NORM: dict[str, list[str]] = {_norm(k): v for k, v in _FIELD_ALIASES.items()}
+_DATE_FIELDS_NORM = {_norm(x) for x in ("Ngày GD", "Ngày GN", "Ngày NAPAS", "Ngày Core", "Ngày Swift")}
+
 def _to_date_str(v: str) -> str:
     """Normalize various date formats to YYYY-MM-DD for comparison."""
     s = str(v).strip()
@@ -159,7 +175,15 @@ def _resolve_field(f: str, merged: dict) -> str:
     for key in _FIELD_ALIASES.get(f, []):
         if key in merged and merged[key] is not None:
             return str(merged[key]).strip()
+    # Diacritic/case-insensitive fallback (see _norm docstring).
+    for key in _FIELD_ALIASES_NORM.get(_norm(f), []):
+        if key in merged and merged[key] is not None:
+            return str(merged[key]).strip()
     return ""
+
+
+def _is_date_field(name: str) -> bool:
+    return _norm(name) in _DATE_FIELDS_NORM
 
 
 def _eval_chip(chip: dict, merged: dict, left_data: dict, right_data: dict | None) -> bool:
@@ -179,17 +203,18 @@ def _eval_chip(chip: dict, merged: dict, left_data: dict, right_data: dict | Non
 
     actual_str = _resolve_field(f, merged)
 
-    _date_fields = {"Ngày GD", "Ngày GN", "Ngày NAPAS", "Ngày Core", "Ngày Swift"}
-    if val in _date_fields or f in _date_fields:
+    if _is_date_field(val) or _is_date_field(f):
         # Date comparison: normalize both to YYYY-MM-DD
         a = _to_date_str(actual_str)
-        b_raw = _resolve_field(val, merged) if val in _date_fields else val
+        b_raw = _resolve_field(val, merged) if _is_date_field(val) else val
         b = _to_date_str(b_raw)
     else:
-        # Case-insensitive string comparison for status values
-        a = actual_str.lower()
+        # Diacritic/case-insensitive comparison for status values — DateRules'
+        # suggestion dropdown offers accented text ("Thành công") while raw
+        # data is unaccented ("THANH CONG"); must normalize both the same way.
+        a = _norm(actual_str)
         b_raw = _resolve_field(val, merged)
-        b = (b_raw if b_raw else val).lower()
+        b = _norm(b_raw if b_raw else val)
 
     if op == "=":         return a == b
     if op in ("≠", "ne"): return a != b
