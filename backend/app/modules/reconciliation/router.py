@@ -11,6 +11,7 @@ from app.modules.reconciliation.engine_flex import (
     run_flex_reconcile,
     mark_stale_by_config,
     mark_stale_all,
+    migrate_status_rules,
 )
 from app.modules.reconciliation.service import get_results
 from app.modules.reconciliation.rows_builder import get_rows, clear_rows_cache
@@ -168,14 +169,21 @@ class StatusRulesBody(BaseModel):
 @router.get("/status-rules")
 def get_status_rules():
     with db_cursor() as cur:
-        cur.execute("SELECT TOP 1 rules_json, updated, updated_by FROM reconcileStatusRules ORDER BY id DESC")
+        cur.execute("SELECT TOP 1 id, rules_json, updated, updated_by FROM reconcileStatusRules ORDER BY id DESC")
         row = cur.fetchone()
     if not row:
         return {"rules": {}, "updated": None, "updated_by": None}
+    rules, was_migrated = migrate_status_rules(json.loads(row[1]))
+    if was_migrated:
+        with db_cursor() as cur:
+            cur.execute(
+                "UPDATE reconcileStatusRules SET rules_json = ? WHERE id = ?",
+                json.dumps(rules, ensure_ascii=False), row[0],
+            )
     return {
-        "rules": json.loads(row[0]),
-        "updated": row[1].isoformat() if row[1] else None,
-        "updated_by": row[2],
+        "rules": rules,
+        "updated": row[2].isoformat() if row[2] else None,
+        "updated_by": row[3],
     }
 
 

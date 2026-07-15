@@ -121,6 +121,28 @@ def update_type(type_id: int, body: dict) -> dict:
     return {"ok": True}
 
 
+@router.delete("/types/{type_id}", status_code=200)
+def delete_type(type_id: int) -> dict:
+    """Soft-delete a file type (set is_active=0). Blocked if it still has
+    active uploaded files — remove/purge that data first so no upload ends
+    up pointing at a type that's disappeared from every list."""
+    with db_cursor() as cur:
+        cur.execute("SELECT id FROM uploadedTypes WHERE id = ? AND is_active = 1", type_id)
+        if not cur.fetchone():
+            raise HTTPException(404, "Type not found")
+        cur.execute("SELECT COUNT(*) FROM uploadedFiles WHERE upload_type_id = ? AND is_active = 1", type_id)
+        file_count = cur.fetchone()[0]
+        if file_count > 0:
+            raise HTTPException(
+                409,
+                f"Loại file này còn {file_count} file đã tải lên — xóa dữ liệu (Xóa dữ liệu ở trang Tải lên) trước khi xóa loại file.",
+            )
+        cur.execute("UPDATE uploadedTypes SET is_active = 0 WHERE id = ?", type_id)
+    clear_type_id_cache()
+    clear_db_rows_cache()
+    return {"ok": True}
+
+
 # ── Files ─────────────────────────────────────────────────────────────────────
 
 @router.get("/files")

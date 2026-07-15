@@ -1,296 +1,355 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageShell from '../../components/PageShell'
+import Button from '../../components/Button'
+import Modal from '../../components/Modal'
+import { Input, Select, FormRow } from '../../components/Input'
+import { useApp } from '../../context/AppContext'
 import { C, radius, shadow } from '../../theme'
-import { SWIFT_COLS_DI, SWIFT_COLS_DEN, NAPAS_COLS_DI, NAPAS_COLS_DEN, CORE_COLS_DI, CORE_COLS_DEN } from '../../data/reconcile'
 import { api } from '../../api/client'
+import {
+  FIELD_OPTIONS, STATUS_FIELDS, DATE_FIELDS, PRESENCE_FIELDS,
+  STATUS_VALUE_OPTIONS, DATE_FIELD_DEFAULT_COMPARE,
+  fieldKind, fieldLabel, describeChip, describeGroup,
+} from '../../data/dateRulesVocab'
 
 const F = (f, op, v) => ({ f, op, v })
+const rule = (id, label, color, ...groups) => ({ id, label, color, groups })
 
+/* Mirrors backend/app/db/seed.py's _STATUS_RULES exactly — this is what
+ * "Khôi phục mặc định" restores. Keep both in sync if the defaults change. */
 const DEFAULT_CONDS = {
   SWIFT_DI: [
-    [F('TT Swift','=','Thành công'), F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Thành công'), F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Timeout'),    F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Timeout'),    F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Thất bại'),   F('Ngày GD','=','Ngày GN')],
-    [F('TT Swift','=','Thất bại'),   F('Ngày GD','≠','Ngày GN')],
-    [F('TT Swift','=','Thành công'), F('Core','=','null')],
+    rule('swift_di_0', 'Thành công – Core ngày T', '#059669',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Thành công'), F('Core', 'ne', 'null')]),
+    rule('swift_di_1', 'Thành công – Core ngày T+1', '#0891b2',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Thành công'), F('Core', 'ne', 'null')]),
+    rule('swift_di_2', 'Timeout – Core ngày T', '#d97706',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Timeout'), F('Core', 'ne', 'null')]),
+    rule('swift_di_3', 'Timeout – Core ngày T+1', '#f59e0b',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Timeout'), F('Core', 'ne', 'null')]),
+    rule('swift_di_4', 'Thất bại – ngày T', '#6b7280',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Thất bại'), F('Core', 'ne', 'null')]),
+    rule('swift_di_5', 'Thất bại – ngày T+1', '#9ca3af',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Thất bại'), F('Core', 'ne', 'null')]),
+    rule('swift_di_6', 'Chỉ Swift', '#dc2626', [F('Core', '=', 'null')]),
   ],
   SWIFT_DEN: [
-    [F('TT Swift','=','Thành công'), F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Thành công'), F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Timeout'),    F('Ngày GD','=','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Timeout'),    F('Ngày GD','≠','Ngày GN'),  F('Core','≠','null')],
-    [F('TT Swift','=','Thất bại'),   F('Ngày GD','=','Ngày GN')],
-    [F('TT Swift','=','Thất bại'),   F('Ngày GD','≠','Ngày GN')],
-    [F('TT Swift','=','Thành công'), F('Core','=','null')],
+    rule('swift_den_0', 'Thành công – Core ngày T', '#059669',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Thành công'), F('Core', 'ne', 'null')]),
+    rule('swift_den_1', 'Thành công – Core ngày T+1', '#0891b2',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Thành công'), F('Core', 'ne', 'null')]),
+    rule('swift_den_2', 'Timeout – Core ngày T', '#d97706',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Timeout'), F('Core', 'ne', 'null')]),
+    rule('swift_den_3', 'Timeout – Core ngày T+1', '#f59e0b',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Timeout'), F('Core', 'ne', 'null')]),
+    rule('swift_den_4', 'Thất bại – ngày T', '#6b7280',
+      [F('Ngày GD', '=', 'Ngày GN'), F('TT Swift', '=', 'Thất bại'), F('Core', 'ne', 'null')]),
+    rule('swift_den_5', 'Thất bại – ngày T+1', '#9ca3af',
+      [F('Ngày GD', 'ne', 'Ngày GN'), F('TT Swift', '=', 'Thất bại'), F('Core', 'ne', 'null')]),
+    rule('swift_den_6', 'Chỉ Swift', '#dc2626', [F('Core', '=', 'null')]),
   ],
   NAPAS_DI: [
-    [F('TC/KTC','=','TC'), F('Ngày NAPAS','<','Ngày Core'), F('Core','≠','null')],
-    [F('TC/KTC','=','TC'), F('Ngày NAPAS','=','Ngày Core'), F('Core','≠','null')],
-    [F('TC/KTC','=','KTC')],
-    [F('TC/KTC','=','TC'), F('Core','=','null')],
+    rule('napas_di_0', 'Thành công – NAPAS ngày T-1, Core ngày T', '#0891b2',
+      [F('Ngày NAPAS', '<', 'Ngày Core'), F('TC/KTC', '=', 'TC'), F('Core', 'ne', 'null')]),
+    rule('napas_di_1', 'Thành công – NAPAS ngày T, Core ngày T', '#059669',
+      [F('Ngày NAPAS', '=', 'Ngày Core'), F('TC/KTC', '=', 'TC'), F('Core', 'ne', 'null')]),
+    rule('napas_di_2', 'Không thành công (KTC)', '#dc2626', [F('TC/KTC', '=', 'KTC')]),
+    rule('napas_di_3', 'Chỉ NAPAS TC – không có Core', '#d97706',
+      [F('TC/KTC', '=', 'TC'), F('Core', '=', 'null')]),
   ],
   NAPAS_DEN: [
-    [F('TC/KTC','=','TC'), F('Ngày Core','<','Ngày NAPAS'), F('Core','≠','null')],
-    [F('TC/KTC','=','TC'), F('Ngày Core','=','Ngày NAPAS'), F('Core','≠','null')],
-    [F('TC/KTC','=','TC'), F('Ngày Core','>','Ngày NAPAS'), F('Core','≠','null')],
+    rule('napas_den_0', 'Thành công – Core ngày T-1', '#7c3aed',
+      [F('Ngày Core', '<', 'Ngày NAPAS'), F('Core', 'ne', 'null')]),
+    rule('napas_den_1', 'Thành công – Core ngày T', '#059669',
+      [F('Ngày Core', '=', 'Ngày NAPAS'), F('Core', 'ne', 'null')]),
+    rule('napas_den_2', 'Thành công – Core ngày T+1', '#0891b2',
+      [F('Ngày Core', '>', 'Ngày NAPAS'), F('Core', 'ne', 'null')]),
   ],
   CORE_DI: [
-    [F('Ngày Swift','<','Ngày Core'), F('Ngày NAPAS','=','Ngày Core'), F('Swift & NAPAS','≠','null')],
-    [F('Ngày Swift','=','Ngày Core'), F('Ngày NAPAS','=','Ngày Core'), F('Swift & NAPAS','≠','null')],
-    [F('Ngày Swift','=','Ngày Core'), F('Ngày NAPAS','>','Ngày Core'), F('Swift & NAPAS','≠','null')],
-    [F('Swift','≠','null'),           F('NAPAS','=','null'),           F('Core','≠','null')],
+    rule('core_di_0', 'Swift ngày T-1 – NAPAS ngày T', '#0891b2',
+      [F('Ngày NAPAS', '<', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_di_1', 'Swift ngày T – NAPAS ngày T', '#059669',
+      [F('Ngày NAPAS', '=', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_di_2', 'Swift ngày T – NAPAS ngày T+1', '#7c3aed',
+      [F('Ngày NAPAS', '>', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_di_3', 'Thất bại – không có trên NAPAS', '#d97706',
+      [F('TT Swift', '=', 'Thất bại'), F('Core', 'ne', 'null')]),
   ],
   CORE_DEN: [
-    [F('Ngày NAPAS','<','Ngày Core'), F('NAPAS','≠','null')],
-    [F('Ngày NAPAS','=','Ngày Core'), F('NAPAS','≠','null')],
-    [F('Ngày NAPAS','>','Ngày Core'), F('NAPAS','≠','null')],
-    [F('Swift','≠','null'),           F('NAPAS','=','null'),           F('Core','≠','null')],
+    rule('core_den_0', 'Core ngày T – NAPAS ngày T-1', '#0891b2',
+      [F('Ngày NAPAS', '<', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_den_1', 'Core ngày T – NAPAS ngày T', '#059669',
+      [F('Ngày NAPAS', '=', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_den_2', 'Core ngày T – NAPAS ngày T+1', '#7c3aed',
+      [F('Ngày NAPAS', '>', 'Ngày Core'), F('Core', 'ne', 'null')]),
+    rule('core_den_3', 'Core có – không có NAPAS', '#d97706', [F('Core', '=', 'null')]),
   ],
 }
 
-const OP_COLOR = {
-  '=':  { color: '#166534', bg: '#dcfce7', border: '#86efac' },
-  '≠':  { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
-  '<':  { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
-  '>':  { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
+const COLOR_PRESETS = ['#059669', '#0891b2', '#7c3aed', '#d97706', '#dc2626', '#6b7280', '#f59e0b', '#9ca3af', '#2563eb', '#be185d']
+
+function newBlankRule() {
+  return { id: `r_${Date.now()}`, label: '', color: COLOR_PRESETS[0], groups: [[F(FIELD_OPTIONS[0], '=', '')]] }
 }
 
-const FIELD_OPTIONS = [
-  'TT Swift', 'Ngày GD', 'Ngày GN', 'Swift',
-  'TC/KTC', 'Ngày NAPAS', 'NAPAS',
-  'Ngày Core', 'Core', 'Ngày Swift', 'Swift & NAPAS',
-]
-
-const VALUE_SUGGESTIONS = {
-  'TT Swift':      ['Thành công', 'Timeout', 'Thất bại'],
-  'Ngày GD':       ['Ngày GN'],
-  'Ngày GN':       ['Ngày GD'],
-  'TC/KTC':        ['TC', 'KTC'],
-  'Ngày NAPAS':    ['Ngày Core'],
-  'Ngày Swift':    ['Ngày Core'],
-  'Ngày Core':     ['Ngày NAPAS', 'Ngày Swift'],
-  'Core':          ['null'],
-  'Swift':         ['null'],
-  'NAPAS':         ['null'],
-  'Swift & NAPAS': ['null'],
+function newBlankChip(field = FIELD_OPTIONS[0]) {
+  const kind = fieldKind(field)
+  if (kind === 'presence') return F(field, 'ne', 'null')
+  if (kind === 'date') return F(field, '=', DATE_FIELD_DEFAULT_COMPARE[field] || DATE_FIELDS[0])
+  return F(field, '=', STATUS_VALUE_OPTIONS[field]?.[0]?.value || '')
 }
 
+/* ── Chip editor row — one condition, adapts inputs to field kind ────────── */
+function ChipRow({ chip, onChange, onRemove }) {
+  const kind = fieldKind(chip.f)
+  const sel = { fontSize: 12, padding: '4px 8px', borderRadius: 5, border: `1px solid ${C.cardBorder}`, background: '#fff', fontFamily: 'inherit' }
 
-/* ── Chip ─────────────────────────────────────────────────────────────────── */
-function Chip({ chip, onRemove }) {
-  const c = OP_COLOR[chip.op] ?? { color: '#374151', bg: '#f3f4f6', border: '#e5e7eb' }
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 2,
-      padding: onRemove ? '2px 4px 2px 7px' : '2px 7px',
-      borderRadius: 5, border: `1px solid ${c.border}`,
-      background: c.bg, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap',
-    }}>
-      <span style={{ color: C.textMuted, fontWeight: 400 }}>{chip.f}</span>
-      <span style={{ color: c.color, fontWeight: 700, margin: '0 2px' }}>{chip.op}</span>
-      <span style={{ color: c.color, fontWeight: 700 }}>{chip.v}</span>
-      {onRemove && (
-        <button onClick={onRemove} style={{
-          marginLeft: 2, background: 'none', border: 'none', cursor: 'pointer',
-          color: '#ef4444', fontSize: 14, fontWeight: 700, padding: '0 2px',
-          lineHeight: 1, display: 'flex', alignItems: 'center',
-        }}>×</button>
-      )}
-    </span>
-  )
-}
-
-/* ── AddChipForm ──────────────────────────────────────────────────────────── */
-function AddChipForm({ onAdd }) {
-  const [f, setF] = useState(FIELD_OPTIONS[0])
-  const [op, setOp] = useState('=')
-  const [v, setV] = useState('')
-
-  const suggestions = VALUE_SUGGESTIONS[f] ?? []
-  const sel = { fontSize: 11, padding: '3px 6px', borderRadius: 4, border: `1px solid ${C.cardBorder}`, background: '#fff', fontFamily: 'monospace', cursor: 'pointer' }
-
-  const handleAdd = () => {
-    const val = v.trim()
-    if (!val) return
-    onAdd({ f, op, v: val })
-    setV('')
-  }
+  const setField = (f) => onChange(newBlankChip(f))
 
   return (
-    <div style={{
-      display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap',
-      marginTop: 8, padding: '8px 10px',
-      background: '#f8fafc', borderRadius: 6, border: '1px dashed #d1d5db',
-    }}>
-      <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, flexShrink: 0 }}>
-        + Điều kiện:
-      </span>
-      <select value={f} onChange={e => { setF(e.target.value); setV('') }} style={sel}>
-        {FIELD_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '6px 8px', background: '#fff', borderRadius: 6, border: `1px solid ${C.cardBorder}` }}>
+      <select value={chip.f} onChange={e => setField(e.target.value)} style={{ ...sel, minWidth: 180 }}>
+        {FIELD_OPTIONS.map(f => <option key={f} value={f}>{fieldLabel(f)}</option>)}
       </select>
-      <select value={op} onChange={e => setOp(e.target.value)} style={{ ...sel, width: 48, textAlign: 'center' }}>
-        {Object.keys(OP_COLOR).map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      {suggestions.length > 0 ? (
-        <select value={v} onChange={e => setV(e.target.value)} style={{ ...sel, minWidth: 100 }}>
-          <option value="">-- giá trị --</option>
-          {suggestions.map(s => <option key={s} value={s}>{s}</option>)}
+
+      {kind === 'presence' && (
+        <select value={chip.op === '=' ? 'no' : 'yes'} onChange={e => onChange({ ...chip, op: e.target.value === 'yes' ? 'ne' : '=', v: 'null' })} style={{ ...sel, minWidth: 160 }}>
+          <option value="yes">Có tương ứng</option>
+          <option value="no">Không có tương ứng</option>
         </select>
-      ) : (
-        <input
-          value={v} onChange={e => setV(e.target.value)}
-          placeholder="nhập giá trị..."
-          onKeyDown={e => e.key === 'Enter' && handleAdd()}
-          style={{ ...sel, width: 110, cursor: 'text' }}
-        />
       )}
-      <button onClick={handleAdd} style={{
-        fontSize: 11, padding: '3px 10px', borderRadius: 4,
-        border: '1px solid #bfdbfe', background: '#eff6ff',
-        color: '#1e40af', fontWeight: 700, cursor: 'pointer',
-      }}>Thêm</button>
+
+      {kind === 'date' && (
+        <>
+          <select value={chip.op} onChange={e => onChange({ ...chip, op: e.target.value })} style={{ ...sel, width: 90 }}>
+            <option value="=">bằng</option>
+            <option value="ne">khác</option>
+            <option value="<">trước</option>
+            <option value=">">sau</option>
+          </select>
+          <select value={chip.v} onChange={e => onChange({ ...chip, v: e.target.value })} style={{ ...sel, minWidth: 180 }}>
+            {DATE_FIELDS.filter(f => f !== chip.f).map(f => <option key={f} value={f}>{fieldLabel(f)}</option>)}
+          </select>
+        </>
+      )}
+
+      {kind === 'status' && (
+        <>
+          <select value={chip.op} onChange={e => onChange({ ...chip, op: e.target.value })} style={{ ...sel, width: 80 }}>
+            <option value="=">là</option>
+            <option value="ne">khác</option>
+          </select>
+          {STATUS_VALUE_OPTIONS[chip.f] ? (
+            <select value={chip.v} onChange={e => onChange({ ...chip, v: e.target.value })} style={{ ...sel, minWidth: 160 }}>
+              {STATUS_VALUE_OPTIONS[chip.f].map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : (
+            <input value={chip.v} onChange={e => onChange({ ...chip, v: e.target.value })} placeholder="giá trị..." style={{ ...sel, width: 140 }} />
+          )}
+        </>
+      )}
+
+      <button onClick={onRemove} title="Xóa điều kiện này" style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
     </div>
   )
 }
 
-/* ── ColTable ─────────────────────────────────────────────────────────────── */
-function ColTable({ cols, rowConds, condKey, onSaveRow }) {
-  const [editingRow, setEditingRow] = useState(null)
-  const [draft, setDraft]           = useState([])
+/* ── Group editor — one AND-group of chips ────────────────────────────────── */
+function GroupEditor({ group, onChange, onRemoveGroup, showRemoveGroup }) {
+  const setChip = (i, chip) => onChange(group.map((c, j) => j === i ? chip : c))
+  const removeChip = (i) => onChange(group.filter((_, j) => j !== i))
+  const addChip = () => onChange([...group, newBlankChip()])
 
-  /* reset khi đổi tab */
-  useEffect(() => { setEditingRow(null) }, [condKey])
+  return (
+    <div style={{ padding: 10, background: '#f8fafc', borderRadius: radius.md, border: `1px dashed ${C.cardBorder}` }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {group.map((chip, i) => (
+          <div key={i}>
+            {i > 0 && <div style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, margin: '4px 0 4px 4px' }}>VÀ</div>}
+            <ChipRow chip={chip} onChange={c => setChip(i, c)} onRemove={() => removeChip(i)} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button onClick={addChip} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, border: `1px dashed ${C.primary}`, background: 'none', color: C.primary, cursor: 'pointer' }}>+ Thêm điều kiện (VÀ)</button>
+        {showRemoveGroup && (
+          <button onClick={onRemoveGroup} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, border: 'none', background: 'none', color: C.error, cursor: 'pointer' }}>Xóa nhóm này</button>
+        )}
+      </div>
+    </div>
+  )
+}
 
-  const startEdit = i => {
-    setDraft(rowConds.map(r => [...r]))
-    setEditingRow(i)
-  }
-  const cancel = () => setEditingRow(null)
-  const save   = i => { onSaveRow(condKey, i, draft[i]); setEditingRow(null) }
+/* ── Rule editor modal — create or edit one status ────────────────────────── */
+function RuleModal({ open, editing, onClose, onSave, onDelete }) {
+  const [form, setForm] = useState(() => editing ?? newBlankRule())
+  useEffect(() => { if (open) setForm(editing ? JSON.parse(JSON.stringify(editing)) : newBlankRule()) }, [open, editing])
 
-  const removeChip = (ri, ci) =>
-    setDraft(prev => prev.map((r, i) => i === ri ? r.filter((_, j) => j !== ci) : r))
-  const addChip = (ri, chip) =>
-    setDraft(prev => prev.map((r, i) => i === ri ? [...r, chip] : r))
+  const setGroup = (i, group) => setForm(f => ({ ...f, groups: f.groups.map((g, j) => j === i ? group : g) }))
+  const removeGroup = (i) => setForm(f => ({ ...f, groups: f.groups.filter((_, j) => j !== i) }))
+  const addGroup = () => setForm(f => ({ ...f, groups: [...f.groups, [newBlankChip()]] }))
 
+  const canSave = form.label.trim() && form.groups.length > 0 && form.groups.every(g => g.length > 0)
+
+  return (
+    <Modal
+      open={open}
+      title={editing ? 'Sửa trạng thái' : 'Tạo trạng thái mới'}
+      onClose={onClose}
+      onConfirm={() => canSave && onSave({ ...form, label: form.label.trim() })}
+      confirmLabel="Lưu"
+      width={640}
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 4 }}>
+        <FormRow label="Tên trạng thái" hint="Hiển thị cho người dùng khi xem kết quả đối soát">
+          <Input value={form.label} onChange={e => setForm(f => ({ ...f, label: e.target.value }))} placeholder="VD: Thành công – khớp cùng ngày" />
+        </FormRow>
+        <FormRow label="Màu">
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 130 }}>
+            {COLOR_PRESETS.map(c => (
+              <button
+                key={c}
+                onClick={() => setForm(f => ({ ...f, color: c }))}
+                title={c}
+                style={{
+                  width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer',
+                  border: form.color === c ? `2px solid ${C.text}` : '2px solid transparent',
+                  boxShadow: form.color === c ? `0 0 0 1px #fff inset` : 'none',
+                }}
+              />
+            ))}
+          </div>
+        </FormRow>
+      </div>
+
+      <FormRow label="Điều kiện" hint="Trạng thái này được gán khi TẤT CẢ điều kiện trong ít nhất 1 nhóm đều đúng (các nhóm nối bằng HOẶC)">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {form.groups.map((group, i) => (
+            <div key={i}>
+              {i > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0' }}>
+                  <div style={{ flex: 1, height: 1, background: C.cardBorder }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: C.primary }}>HOẶC</span>
+                  <div style={{ flex: 1, height: 1, background: C.cardBorder }} />
+                </div>
+              )}
+              <GroupEditor
+                group={group}
+                onChange={g => setGroup(i, g)}
+                onRemoveGroup={() => removeGroup(i)}
+                showRemoveGroup={form.groups.length > 1}
+              />
+            </div>
+          ))}
+        </div>
+        <button onClick={addGroup} style={{ marginTop: 8, fontSize: 12, padding: '5px 12px', borderRadius: 6, border: `1px dashed ${C.primary}`, background: 'none', color: C.primary, cursor: 'pointer' }}>+ Thêm nhóm điều kiện (HOẶC)</button>
+      </FormRow>
+
+      {editing && (
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.cardBorder}` }}>
+          <button
+            onClick={() => onDelete(editing)}
+            style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6, border: `1px solid ${C.errorBorder ?? '#fecaca'}`, background: 'none', color: C.error, cursor: 'pointer' }}
+          >
+            Xóa trạng thái này
+          </button>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+/* ── Rule row (read view) ──────────────────────────────────────────────────── */
+function RuleRow({ r, onEdit }) {
+  return (
+    <tr style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+      <td style={{ padding: '10px 14px', verticalAlign: 'top', width: '30%' }}>
+        <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 5, fontSize: 12, fontWeight: 700, background: `${r.color}1a`, color: r.color, border: `1px solid ${r.color}4d` }}>
+          {r.label}
+        </span>
+      </td>
+      <td style={{ padding: '10px 14px', verticalAlign: 'top', fontSize: 12, color: C.text, lineHeight: 1.7 }}>
+        {r.groups.map((g, i) => (
+          <div key={i}>
+            {i > 0 && <span style={{ color: C.primary, fontWeight: 700 }}>HOẶC </span>}
+            {describeGroup(g)}
+          </div>
+        ))}
+        {r.groups.length === 0 && <span style={{ color: '#d1d5db', fontStyle: 'italic' }}>Chưa có điều kiện</span>}
+      </td>
+      <td style={{ padding: '10px 8px', verticalAlign: 'top', textAlign: 'center', width: 52 }}>
+        <button
+          onClick={onEdit}
+          title="Chỉnh sửa"
+          style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 5, cursor: 'pointer', padding: '4px 7px', fontSize: 13, color: '#9ca3af', lineHeight: 1 }}
+          onMouseEnter={e => Object.assign(e.currentTarget.style, { background: '#f3f4f6', color: '#374151' })}
+          onMouseLeave={e => Object.assign(e.currentTarget.style, { background: 'none', color: '#9ca3af' })}
+        >✎</button>
+      </td>
+    </tr>
+  )
+}
+
+/* ── Table for one tab (one cond_key) ─────────────────────────────────────── */
+function RuleTable({ rules, onEdit, onCreate }) {
   const th = { padding: '8px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${C.cardBorder}` }
-
   return (
     <div style={{ border: `1px solid ${C.cardBorder}`, borderRadius: radius.md, overflow: 'hidden' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ background: C.neutralBg }}>
-            <th style={{ ...th, width: '34%' }}>Trạng thái</th>
-            <th style={{ ...th }}>Điều kiện dữ liệu</th>
+            <th style={th}>Trạng thái</th>
+            <th style={th}>Điều kiện dữ liệu</th>
             <th style={{ ...th, width: 52 }}></th>
           </tr>
         </thead>
         <tbody>
-          {cols.map((col, i) => {
-            const isEditing = editingRow === i
-            const chips = isEditing ? (draft[i] ?? []) : (rowConds[i] ?? [])
-            return (
-              <tr key={i} style={{
-                borderBottom: i < cols.length - 1 ? `1px solid ${C.cardBorder}` : 'none',
-                background: isEditing ? '#fffbeb' : (i % 2 ? C.neutralBg : '#fff'),
-              }}>
-                <td style={{ padding: '10px 14px', verticalAlign: isEditing ? 'top' : 'middle' }}>
-                  <span style={{
-                    display: 'inline-block', padding: '3px 10px', borderRadius: 5,
-                    fontSize: 12, fontWeight: 700,
-                    background: col.bg, color: col.color, border: `1px solid ${col.border}`,
-                  }}>
-                    {col.label}
-                  </span>
-                </td>
-                <td style={{ padding: '10px 14px', verticalAlign: isEditing ? 'top' : 'middle' }}>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                    {chips.map((chip, j) => (
-                      <Chip key={j} chip={chip}
-                        onRemove={isEditing ? () => removeChip(i, j) : undefined} />
-                    ))}
-                    {chips.length === 0 && !isEditing && (
-                      <span style={{ fontSize: 11, color: '#d1d5db', fontStyle: 'italic' }}>Chưa có điều kiện</span>
-                    )}
-                  </div>
-                  {isEditing && (
-                    <>
-                      <AddChipForm onAdd={chip => addChip(i, chip)} />
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                        <button onClick={() => save(i)} style={{
-                          fontSize: 11, padding: '4px 14px', borderRadius: 5,
-                          border: '1px solid #86efac', background: '#dcfce7',
-                          color: '#166534', fontWeight: 700, cursor: 'pointer',
-                        }}>✓ Lưu</button>
-                        <button onClick={cancel} style={{
-                          fontSize: 11, padding: '4px 14px', borderRadius: 5,
-                          border: `1px solid ${C.cardBorder}`, background: '#fff',
-                          color: C.textMuted, cursor: 'pointer',
-                        }}>Hủy</button>
-                      </div>
-                    </>
-                  )}
-                </td>
-                <td style={{ padding: '10px 8px', verticalAlign: 'middle', textAlign: 'center' }}>
-                  {!isEditing && editingRow === null && (
-                    <button
-                      onClick={() => startEdit(i)}
-                      title="Chỉnh sửa điều kiện"
-                      style={{
-                        background: 'none', border: '1px solid #e5e7eb', borderRadius: 5,
-                        cursor: 'pointer', padding: '4px 7px', fontSize: 13,
-                        color: '#9ca3af', lineHeight: 1,
-                      }}
-                      onMouseEnter={e => Object.assign(e.currentTarget.style, { background: '#f3f4f6', color: '#374151' })}
-                      onMouseLeave={e => Object.assign(e.currentTarget.style, { background: 'none', color: '#9ca3af' })}
-                    >✎</button>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
+          {rules.map((r, i) => <RuleRow key={r.id ?? i} r={r} onEdit={() => onEdit(r)} />)}
         </tbody>
       </table>
+      <div style={{ padding: '10px 14px', borderTop: `1px solid ${C.cardBorder}`, background: '#fafafa' }}>
+        <button onClick={onCreate} style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6, border: `1px dashed ${C.primary}`, background: 'none', color: C.primary, cursor: 'pointer' }}>+ Tạo trạng thái mới</button>
+      </div>
     </div>
   )
 }
 
-/* ── Section config ───────────────────────────────────────────────────────── */
+/* ── Section config — UI chrome only, no status data (that comes from conds) ─ */
 const SECTIONS = [
   {
     id: 'swift', title: 'Swift ↔ Core GL', accent: '#1e40af', accentBg: '#eff6ff', accentBorder: '#bfdbfe',
     note: 'T = txnDate (ngày GD thực tế của Swift). T+1 khi txnDate ≠ hostDate — Core ghi nhận vào ngày tiếp theo.',
     tabs: [
-      { label: 'Chiều Đi',  count: SWIFT_COLS_DI.length,  cols: SWIFT_COLS_DI,  condKey: 'SWIFT_DI' },
-      { label: 'Chiều Đến', count: SWIFT_COLS_DEN.length, cols: SWIFT_COLS_DEN, condKey: 'SWIFT_DEN' },
+      { label: 'Chiều Đi',  condKey: 'SWIFT_DI' },
+      { label: 'Chiều Đến', condKey: 'SWIFT_DEN' },
     ],
   },
   {
     id: 'napas', title: 'NAPAS ↔ Core GL', accent: '#854d0e', accentBg: '#fefce8', accentBorder: '#fde68a',
     note: 'NAPAS không có timeout — chỉ TC (failed = false) và KTC (failed = true). T = napas.date.',
     tabs: [
-      { label: 'Chiều Đi',  count: NAPAS_COLS_DI.length,  cols: NAPAS_COLS_DI,  condKey: 'NAPAS_DI' },
-      { label: 'Chiều Đến', count: NAPAS_COLS_DEN.length, cols: NAPAS_COLS_DEN, condKey: 'NAPAS_DEN' },
+      { label: 'Chiều Đi',  condKey: 'NAPAS_DI' },
+      { label: 'Chiều Đến', condKey: 'NAPAS_DEN' },
     ],
   },
   {
     id: 'core', title: 'Core GL ↔ Swift + NAPAS', accent: '#166534', accentBg: '#dcfce7', accentBorder: '#86efac',
     note: 'Core làm gốc (T = core.date). Swift và NAPAS so sánh ngày tương đối với core.date.',
     tabs: [
-      { label: 'Ghi có (Đi)',  count: CORE_COLS_DI.length,  cols: CORE_COLS_DI,  condKey: 'CORE_DI' },
-      { label: 'Ghi nợ (Đến)', count: CORE_COLS_DEN.length, cols: CORE_COLS_DEN, condKey: 'CORE_DEN' },
+      { label: 'Ghi có (Đi)',  condKey: 'CORE_DI' },
+      { label: 'Ghi nợ (Đến)', condKey: 'CORE_DEN' },
     ],
   },
 ]
 
 /* ── Main ─────────────────────────────────────────────────────────────────── */
 export default function DateRules() {
+  const { toast } = useApp()
   const [activeTabs, setActiveTabs] = useState({ swift: 0, napas: 0, core: 0 })
   const [conds, setConds]           = useState(DEFAULT_CONDS)
   const [saving, setSaving]         = useState(false)
   const [dbLoaded, setDbLoaded]     = useState(false)
+  const [modal, setModal]           = useState(null) // { condKey, editing: rule|null }
 
   useEffect(() => {
     api.reconcileConfig.getStatusRules()
@@ -303,20 +362,30 @@ export default function DateRules() {
 
   const setTab = (sectionId, idx) => setActiveTabs(p => ({ ...p, [sectionId]: idx }))
 
-  const handleSaveRow = useCallback((condKey, rowIdx, newChips) => {
-    setConds(prev => {
-      const next = { ...prev, [condKey]: prev[condKey].map((r, i) => i === rowIdx ? newChips : r) }
-      setSaving(true)
-      api.reconcileConfig.saveStatusRules(next)
-        .finally(() => setSaving(false))
-      return next
-    })
-  }, [])
-
-  const handleReset = () => {
-    setConds(DEFAULT_CONDS)
+  const persist = useCallback((next, successMsg) => {
+    setConds(next)
     setSaving(true)
-    api.reconcileConfig.saveStatusRules(DEFAULT_CONDS).finally(() => setSaving(false))
+    api.reconcileConfig.saveStatusRules(next)
+      .then(() => { if (successMsg) toast(successMsg, 'success') })
+      .catch(() => toast('Lưu thất bại.', 'error'))
+      .finally(() => setSaving(false))
+  }, [toast])
+
+  const handleReset = () => persist(DEFAULT_CONDS, 'Đã khôi phục mặc định.')
+
+  const handleSaveRule = (condKey, ruleData) => {
+    const list = conds[condKey] || []
+    const idx = list.findIndex(r => r.id === ruleData.id)
+    const nextList = idx >= 0 ? list.map((r, i) => i === idx ? ruleData : r) : [...list, ruleData]
+    persist({ ...conds, [condKey]: nextList }, idx >= 0 ? 'Đã lưu thay đổi.' : 'Đã tạo trạng thái mới.')
+    setModal(null)
+  }
+
+  const handleDeleteRule = (condKey, ruleData) => {
+    if (!window.confirm(`Xóa trạng thái "${ruleData.label}"? Không thể hoàn tác.`)) return
+    const nextList = (conds[condKey] || []).filter(r => r.id !== ruleData.id)
+    persist({ ...conds, [condKey]: nextList }, 'Đã xóa trạng thái.')
+    setModal(null)
   }
 
   const modified = JSON.stringify(conds) !== JSON.stringify(DEFAULT_CONDS)
@@ -324,7 +393,7 @@ export default function DateRules() {
   return (
     <PageShell
       title="Phân loại trạng thái đối soát"
-      subtitle="Điều kiện dữ liệu tạo ra từng trạng thái — bấm ✎ để chỉnh sửa, tự động lưu vào DB."
+      subtitle="Định nghĩa điều kiện dữ liệu tạo ra từng trạng thái. Nhấn ✎ để sửa, hoặc tạo trạng thái mới — tự động lưu vào DB."
     >
       {/* Info bar */}
       <div style={{
@@ -334,7 +403,7 @@ export default function DateRules() {
       }}>
         <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ</span>
         <span style={{ flex: 1 }}>
-          Bấm <b>✎</b> trên từng dòng để chỉnh sửa điều kiện.
+          Bấm <b>✎</b> để sửa một trạng thái, hoặc <b>+ Tạo trạng thái mới</b> để thêm.
           {saving ? ' Đang lưu...' : ' Thay đổi tự động lưu vào DB.'}
         </span>
         {modified && (
@@ -346,7 +415,6 @@ export default function DateRules() {
         )}
       </div>
 
-      {/* Modified warning */}
       {modified && (
         <div style={{
           marginBottom: 20, padding: '8px 14px',
@@ -362,18 +430,18 @@ export default function DateRules() {
         {SECTIONS.map(sec => {
           const activeIdx = activeTabs[sec.id]
           const tab = sec.tabs[activeIdx]
+          const rules = conds[tab.condKey] || []
           return (
             <div key={sec.id} style={{ background: '#fff', border: `1px solid ${C.cardBorder}`, borderRadius: radius.lg, boxShadow: shadow.sm, overflow: 'hidden' }}>
-              {/* Section header */}
               <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.cardBorder}`, background: sec.accentBg, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <span style={{ fontWeight: 700, fontSize: 15, color: sec.accent }}>{sec.title}</span>
                 <span style={{ fontSize: 12, color: C.textMuted, flex: 1 }}>{sec.note}</span>
               </div>
 
-              {/* Direction tabs */}
               <div style={{ display: 'flex', borderBottom: `1px solid ${C.cardBorder}`, background: C.neutralBg }}>
                 {sec.tabs.map((t, i) => {
                   const active = i === activeIdx
+                  const count = (conds[t.condKey] || []).length
                   return (
                     <button key={i} onClick={() => setTab(sec.id, i)} style={{
                       padding: '8px 18px', border: 'none',
@@ -389,20 +457,18 @@ export default function DateRules() {
                         color: active ? sec.accent : C.textMuted,
                         border: `1px solid ${active ? sec.accentBorder : C.cardBorder}`,
                       }}>
-                        {t.count}
+                        {count}
                       </span>
                     </button>
                   )
                 })}
               </div>
 
-              {/* Table */}
               <div style={{ padding: 16 }}>
-                <ColTable
-                  cols={tab.cols}
-                  rowConds={conds[tab.condKey] ?? []}
-                  condKey={tab.condKey}
-                  onSaveRow={handleSaveRow}
+                <RuleTable
+                  rules={rules}
+                  onEdit={(r) => setModal({ condKey: tab.condKey, editing: r })}
+                  onCreate={() => setModal({ condKey: tab.condKey, editing: null })}
                 />
               </div>
             </div>
@@ -410,18 +476,23 @@ export default function DateRules() {
         })}
       </div>
 
-      {/* Legend */}
       <div style={{ marginTop: 20, padding: '12px 16px', background: C.neutralBg, border: `1px solid ${C.cardBorder}`, borderRadius: radius.md }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Chú thích toán tử</div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {Object.entries(OP_COLOR).map(([op, c]) => (
-            <span key={op} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.textMuted }}>
-              <span style={{ padding: '1px 8px', borderRadius: 4, fontWeight: 700, background: c.bg, color: c.color, border: `1px solid ${c.border}`, fontFamily: 'monospace' }}>{op}</span>
-              {{ '=': 'bằng', '≠': 'khác / có giá trị', '<': 'nhỏ hơn (ngày trước)', '>': 'lớn hơn (ngày sau)' }[op]}
-            </span>
-          ))}
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Cách đọc điều kiện</div>
+        <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.6 }}>
+          Trong <b>1 nhóm</b>: tất cả điều kiện phải đúng cùng lúc (VÀ). Giữa các nhóm: chỉ cần <b>1 nhóm</b> đúng là đủ (HOẶC).
+          Trạng thái được xét theo thứ tự trên xuống — dòng nào khớp trước sẽ được gán, các dòng sau không còn được xét nữa.
         </div>
       </div>
+
+      {modal && (
+        <RuleModal
+          open={!!modal}
+          editing={modal.editing}
+          onClose={() => setModal(null)}
+          onSave={(r) => handleSaveRule(modal.condKey, r)}
+          onDelete={(r) => handleDeleteRule(modal.condKey, r)}
+        />
+      )}
     </PageShell>
   )
 }

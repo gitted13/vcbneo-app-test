@@ -254,6 +254,33 @@ const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
 
 ---
 
+## Phân loại trạng thái đối soát (DateRules) — reconcileStatusRules
+
+Trang **Phân loại trạng thái đối soát** (`/date-rules`) cấu hình điều kiện để `engine_flex.py`'s `run_flex_reconcile()` gán trạng thái (KHỚP, LỆCH NGÀY, THẤT BẠI, ...) cho từng dòng khi chạy đối soát (nút "Chạy" ở trang **Đối soát**). Đây là hệ thống RIÊNG, khác với `recon_status` mà `CoreSummary`/`NapasCore`/`SwiftCore`/`MasterSummary` dùng (logic Python cố định trong `unified_db_builder._infer_recon_status`, không cấu hình qua UI được).
+
+**Cấu trúc `reconcileStatusRules.rules_json`** (mỗi `cond_key` = SWIFT_DI/SWIFT_DEN/NAPAS_DI/NAPAS_DEN/CORE_DI/CORE_DEN, tương ứng 1 tab trên trang DateRules):
+
+```json
+{
+  "SWIFT_DI": [
+    { "id": "swift_di_0", "label": "Thành công – Core ngày T", "color": "#059669",
+      "groups": [
+        [ { "f": "TT Swift", "op": "=", "v": "Thành công" }, { "f": "Ngày GD", "op": "=", "v": "Ngày GN" }, { "f": "Core", "op": "ne", "v": "null" } ]
+      ]
+    }
+  ]
+}
+```
+
+- Mỗi **rule** tự chứa `label`/`color`/`groups` — không còn khớp theo vị trí mảng với bất kỳ nơi nào khác (trước đây từng khớp theo index với 3 mảng riêng biệt: mã trạng thái hardcode trong backend, nhãn/màu trong `frontend/src/data/reconcile.js` — rất dễ lệch, không thể thêm/xóa trạng thái an toàn). Xóa/thêm rule tự do qua trang DateRules, không cần sửa code.
+- **`groups`**: các nhóm nối bằng **HOẶC** (OR); trong 1 nhóm, mọi điều kiện (chip) phải đúng cùng lúc (**VÀ** / AND). Rule khớp nếu ≥1 nhóm khớp hoàn toàn.
+- **`status` trả về từ `_classify()` chính là `label`** (text tiếng Việt do người cấu hình đặt) — không còn mã nội bộ riêng (`TC_KHOP` kiểu cũ). `reconcileResults.status`, `flex-summary` breakdown, v.v. đều dùng trực tiếp label này.
+- **Field code** (`f`) là tên trừu tượng ("TT Swift", "Ngày GD", "Core"...) được `engine_flex.py`'s `_FIELD_ALIASES` map sang tên cột thật trong dữ liệu. Nhãn hiển thị tiếng Việt cho các field/operator/value này nằm ở `frontend/src/data/dateRulesVocab.js` (KHÔNG phải `data/reconcile.js` — file đó dùng cho hệ KPI của CoreSummary/NapasCore/SwiftCore, không liên quan). Thêm field mới phải thêm ở **cả hai nơi**: `_FIELD_ALIASES` (backend, để engine đọc được giá trị) và `FIELD_LABELS`/`fieldKind()` (frontend, để hiển thị đúng loại input — ngày / trạng thái / có-không dữ liệu tương ứng).
+- **So sánh không phân biệt dấu/hoa-thường** ở tầng engine (`_norm()`) — không cần lo giá trị gõ có dấu hay không khớp với dữ liệu thô không dấu.
+- Dữ liệu cũ (mảng chip trần, không có `label`/`color`/`groups`) được `migrate_status_rules()` tự nâng cấp khi đọc (`GET /status-rules` hoặc khi chạy đối soát) — an toàn, giữ nguyên điều kiện đã lưu, chỉ bọc thêm `label`/`color`/`id`.
+
+---
+
 ## Quy trình vận hành hàng ngày
 
 1. Nhận file từ các hệ thống (Swift, Core, NAPAS)

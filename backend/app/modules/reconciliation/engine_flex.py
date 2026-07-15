@@ -227,27 +227,36 @@ def _eval_chip(chip: dict, merged: dict, left_data: dict, right_data: dict | Non
     return False
 
 
+def _eval_rule_groups(groups: list[list[dict]], merged: dict, left_data: dict, right_data: dict | None) -> bool:
+    """A rule matches if ANY group matches, and a group matches if ALL its
+    chips match — i.e. groups are OR'd together, chips within a group are
+    AND'd. A single-group rule with N chips behaves exactly like the old
+    "all chips must match" format (this is what a migrated legacy rule
+    looks like: groups=[the original chip list])."""
+    return any(
+        all(_eval_chip(c, merged, left_data, right_data) for c in group)
+        for group in groups
+    )
+
+
 def _classify(
     left_data: dict,
     right_data: dict | None,
     merged: dict,
     cond_key: str,
     status_rules: dict,
-    status_cols: list[str],
 ) -> str:
-    """
-    Apply DateRules chip conditions for cond_key.
-    status_cols: ordered list of status names matching the rows in status_rules[cond_key].
-    Returns the first matching status name, or a fallback.
-    """
-    rules_for_key: list[list[dict]] = status_rules.get(cond_key, [])
+    """Apply DateRules rules for cond_key, in order, first match wins.
+    Each rule is self-describing: {id, label, color, groups: [[chip,...],...]}.
+    Returns the matching rule's label, or a fallback status name."""
+    rules_for_key: list[dict] = status_rules.get(cond_key, [])
 
-    for i, chips in enumerate(rules_for_key):
-        if not chips:
+    for rule in rules_for_key:
+        groups = rule.get("groups") or []
+        if not groups:
             continue
-        status_name = status_cols[i] if i < len(status_cols) else f"STATUS_{i}"
-        if all(_eval_chip(c, merged, left_data, right_data) for c in chips):
-            return status_name
+        if _eval_rule_groups(groups, merged, left_data, right_data):
+            return rule.get("label") or rule.get("id") or "KHOP"
 
     # Fallback: simple match/no-match
     if right_data is not None:
@@ -255,7 +264,7 @@ def _classify(
     return "CHI_TRAI"
 
 
-# ── Cond key + status col mapping ─────────────────────────────────────────────
+# ── Cond key mapping ────────────────────────────────────────────────────────
 
 # Maps (leftSource, direction) → DateRules condKey
 _COND_KEY: dict[tuple[str, str], str] = {
@@ -267,17 +276,85 @@ _COND_KEY: dict[tuple[str, str], str] = {
     ("Core",  "Đến"):  "CORE_DEN",
 }
 
-# Status names per cond_key — must match the order in DateRules SECTIONS cols
-_STATUS_COLS: dict[str, list[str]] = {
-    "SWIFT_DI":  ["TC_KHOP", "TC_LECH_NGAY", "TIMEOUT_KHOP", "TIMEOUT_LECH_NGAY",
-                  "THAT_BAI_KHOP", "THAT_BAI_LECH_NGAY", "CHI_SWIFT"],
-    "SWIFT_DEN": ["TC_KHOP", "TC_LECH_NGAY", "TIMEOUT_KHOP", "TIMEOUT_LECH_NGAY",
-                  "THAT_BAI_KHOP", "THAT_BAI_LECH_NGAY"],
-    "NAPAS_DI":  ["TC_KHOP_T", "TC_KHOP_T1", "KTC", "TC_KHONG_CORE"],
-    "NAPAS_DEN": ["KHOP_T_TRUOC", "KHOP_CUNG_NGAY", "KHOP_T_SAU"],
-    "CORE_DI":   ["CORE_SWIFT_T_TRUOC", "CORE_KHOP", "CORE_SWIFT_T_SAU", "CORE_THAT_BAI"],
-    "CORE_DEN":  ["KHOP_NAPAS_T_TRUOC", "KHOP_NAPAS_CUNG_NGAY", "KHOP_NAPAS_T_SAU", "CHI_CORE"],
+# ── Legacy format migration ───────────────────────────────────────────────────
+# Old reconcileStatusRules shape: {cond_key: [[chip,...], [chip,...], ...]} —
+# status NAME/label/color lived in separate frontend arrays (data/reconcile.js
+# SWIFT_COLS_DI etc.) matched purely by array position — fragile, and made it
+# impossible to add/remove/reorder a status without editing frontend source.
+# New shape: {cond_key: [{id, label, color, groups: [[chip,...],...]}, ...]}
+# — every rule carries its own identity, no positional coupling to anything.
+# _LEGACY_RULE_META supplies the label/color a legacy rule gets migrated to
+# (mirrors the labels historically shown in frontend/src/data/reconcile.js's
+# SWIFT_COLS_DI/SWIFT_COLS_DEN/NAPAS_COLS_DI/NAPAS_COLS_DEN/CORE_COLS_DI/
+# CORE_COLS_DEN, transcribed here since the backend can't import a JS file —
+# NOT used at runtime for anything except generating a readable label the
+# first time an old-format row is migrated).
+_LEGACY_RULE_META: dict[str, list[tuple[str, str]]] = {
+    "SWIFT_DI": [
+        ("Thành công – Core ngày T", "#059669"), ("Thành công – Core ngày T+1", "#0891b2"),
+        ("Timeout – Core ngày T", "#d97706"), ("Timeout – Core ngày T+1", "#f59e0b"),
+        ("Thất bại – ngày T", "#6b7280"), ("Thất bại – ngày T+1", "#9ca3af"),
+        ("Chỉ Swift", "#dc2626"),
+    ],
+    "SWIFT_DEN": [
+        ("Thành công – Core ngày T", "#059669"), ("Thành công – Core ngày T+1", "#0891b2"),
+        ("Timeout – Core ngày T", "#d97706"), ("Timeout – Core ngày T+1", "#f59e0b"),
+        ("Thất bại – ngày T", "#6b7280"), ("Thất bại – ngày T+1", "#9ca3af"),
+        ("Chỉ Swift", "#dc2626"),
+    ],
+    "NAPAS_DI": [
+        ("Thành công – NAPAS ngày T-1, Core ngày T", "#0891b2"),
+        ("Thành công – NAPAS ngày T, Core ngày T", "#059669"),
+        ("Không thành công (KTC)", "#dc2626"),
+        ("Chỉ NAPAS TC – không có Core", "#d97706"),
+    ],
+    "NAPAS_DEN": [
+        ("Thành công – Core ngày T-1", "#7c3aed"),
+        ("Thành công – Core ngày T", "#059669"),
+        ("Thành công – Core ngày T+1", "#0891b2"),
+    ],
+    "CORE_DI": [
+        ("Swift ngày T-1 – NAPAS ngày T", "#0891b2"), ("Swift ngày T – NAPAS ngày T", "#059669"),
+        ("Swift ngày T – NAPAS ngày T+1", "#7c3aed"), ("Thất bại – không có trên NAPAS", "#d97706"),
+    ],
+    "CORE_DEN": [
+        ("Core ngày T – NAPAS ngày T-1", "#0891b2"), ("Core ngày T – NAPAS ngày T", "#059669"),
+        ("Core ngày T – NAPAS ngày T+1", "#7c3aed"), ("Core có – không có NAPAS", "#d97706"),
+    ],
 }
+
+_PALETTE = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2", "#64748b"]
+
+
+def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
+    """Upgrade any old-format (bare chip-list) cond_key entries to the new
+    self-describing rule-object format. Returns (possibly-new dict, changed?).
+    Safe/idempotent: cond_keys already in the new format pass through
+    untouched; existing conditions are preserved exactly (wrapped as a
+    single OR-group), only the label/color/id wrapper is added."""
+    changed = False
+    out: dict = {}
+    for cond_key, entries in (rules or {}).items():
+        if not entries or not isinstance(entries, list):
+            out[cond_key] = entries
+            continue
+        if isinstance(entries[0], dict) and "groups" in entries[0]:
+            out[cond_key] = entries  # already new format
+            continue
+        # Old format: entries is a list of chip-lists
+        changed = True
+        meta = _LEGACY_RULE_META.get(cond_key, [])
+        migrated = []
+        for i, chips in enumerate(entries):
+            label, color = meta[i] if i < len(meta) else (f"Trạng thái {i + 1}", _PALETTE[i % len(_PALETTE)])
+            migrated.append({
+                "id": f"{cond_key.lower()}_{i}",
+                "label": label,
+                "color": color,
+                "groups": [chips] if chips else [],
+            })
+        out[cond_key] = migrated
+    return out, changed
 
 
 # ── Main engine ───────────────────────────────────────────────────────────────
@@ -310,14 +387,20 @@ def run_flex_reconcile(
     match_fields: list[dict] = config.get("matchFields", [])
     join_type    = config.get("joinType", "left")
 
-    # 2. Load latest status rules
+    # 2. Load latest status rules (auto-upgrade legacy format if needed)
     with db_cursor() as cur:
-        cur.execute("SELECT TOP 1 rules_json FROM reconcileStatusRules ORDER BY id DESC")
+        cur.execute("SELECT TOP 1 id, rules_json FROM reconcileStatusRules ORDER BY id DESC")
         sr_row = cur.fetchone()
-    status_rules: dict = json.loads(sr_row[0]) if sr_row else {}
+    status_rules: dict = json.loads(sr_row[1]) if sr_row else {}
+    status_rules, was_migrated = migrate_status_rules(status_rules)
+    if was_migrated and sr_row:
+        with db_cursor() as cur:
+            cur.execute(
+                "UPDATE reconcileStatusRules SET rules_json = ? WHERE id = ?",
+                json.dumps(status_rules, ensure_ascii=False), sr_row[0],
+            )
 
-    cond_key    = _COND_KEY.get((left_source, direction), "")
-    status_cols = _STATUS_COLS.get(cond_key, [])
+    cond_key = _COND_KEY.get((left_source, direction), "")
 
     config_snapshot = json.dumps(
         {"config": config, "status_rules_cond_key": cond_key},
@@ -374,7 +457,7 @@ def run_flex_reconcile(
             for rr in matches:
                 matched_right_ids.add(rr["id"])
                 merged = {**lr["data"], **rr["data"]}
-                status = _classify(lr["data"], rr["data"], merged, cond_key, status_rules, status_cols)
+                status = _classify(lr["data"], rr["data"], merged, cond_key, status_rules)
                 new_results.append(_make_result(
                     config_id, today, left_type_id, right_type_id,
                     lr["id"], {"pair_1": rr["id"]}, merged,
@@ -383,7 +466,7 @@ def run_flex_reconcile(
         else:
             if join_type in ("left", "full"):
                 merged = {**lr["data"]}
-                status = _classify(lr["data"], None, merged, cond_key, status_rules, status_cols)
+                status = _classify(lr["data"], None, merged, cond_key, status_rules)
                 new_results.append(_make_result(
                     config_id, today, left_type_id, right_type_id,
                     lr["id"], {"pair_1": None}, merged,

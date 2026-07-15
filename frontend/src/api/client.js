@@ -145,6 +145,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),
+    deleteType: (typeId) => request(`/flex/types/${typeId}`, { method: 'DELETE' }),
     scanFile: (file) => {
       const fd = new FormData()
       fd.append('file', file)

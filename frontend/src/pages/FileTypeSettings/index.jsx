@@ -4,6 +4,8 @@ import Button from '../../components/Button'
 import Badge from '../../components/Badge'
 import Modal from '../../components/Modal'
 import { Input, Select, FormRow } from '../../components/Input'
+import { useAuth } from '../../context/AuthContext'
+import { useApp } from '../../context/AppContext'
 import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
 
@@ -85,6 +87,9 @@ function localToSchema(ft) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function FileTypeSettings() {
+  const { user } = useAuth()
+  const { toast, showConfirm } = useApp()
+  const isAdmin = user?.role === 'Admin'
   const [fileTypes, setFileTypes] = useState([])
   const [loading, setLoading]     = useState(true)
   const [saving, setSaving]       = useState(null)
@@ -173,6 +178,18 @@ export default function FileTypeSettings() {
     }
   }
 
+  const handleDeleteType = (ft) => showConfirm({
+    title: `Xóa loại file "${ft.name}"?`,
+    message: 'Loại file này sẽ không còn hiện ở bất kỳ đâu trong hệ thống. Bị chặn nếu vẫn còn file đã tải lên thuộc loại này.',
+    variant: 'danger',
+    confirmLabel: 'Xóa',
+    onConfirm: () => {
+      api.flex.deleteType(ft._dbId)
+        .then(() => { load(); toast(`Đã xóa loại file "${ft.name}".`, 'success') })
+        .catch(e => toast(e.message || 'Xóa thất bại.', 'error'))
+    },
+  })
+
   const editingCol = editColModal
     ? fileTypes.find(ft => ft._dbId === editColModal.dbId)?.columns[editColModal.idx] ?? null
     : null
@@ -215,6 +232,7 @@ export default function FileTypeSettings() {
             key={ft._dbId}
             ft={ft}
             expanded={expanded === ft._dbId}
+            isAdmin={isAdmin}
             onToggle={() => toggle(ft._dbId)}
             onMutate={(patch) => mutate(ft._dbId, patch)}
             onRemoveCol={(idx) => removeCol(ft._dbId, idx)}
@@ -223,6 +241,7 @@ export default function FileTypeSettings() {
             onScanFile={() => setScanModal(ft._dbId)}
             onClearCols={() => clearCols(ft._dbId)}
             onSave={() => handleSave(ft)}
+            onDelete={() => handleDeleteType(ft)}
             saving={saving === ft._dbId}
           />
         ))}
@@ -267,7 +286,7 @@ export default function FileTypeSettings() {
 
 // ── Type Card ─────────────────────────────────────────────────────────────────
 
-function TypeCard({ ft, expanded, onToggle, onMutate, onRemoveCol, onAddCol, onEditCol, onScanFile, onClearCols, onSave, saving }) {
+function TypeCard({ ft, expanded, isAdmin, onToggle, onMutate, onRemoveCol, onAddCol, onEditCol, onScanFile, onClearCols, onSave, onDelete, saving }) {
   const color = TYPE_COLORS[ft.type_code] ?? C.primary
 
   return (
@@ -289,6 +308,15 @@ function TypeCard({ ft, expanded, onToggle, onMutate, onRemoveCol, onAddCol, onE
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <Badge variant="neutral">{ft.columns.length} cột</Badge>
+          {isAdmin && (
+            <button
+              onClick={e => { e.stopPropagation(); onDelete() }}
+              title={`Xóa loại file "${ft.name}"`}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 13, padding: '0 2px', lineHeight: 1 }}
+              onMouseEnter={e => { e.currentTarget.style.color = C.error }}
+              onMouseLeave={e => { e.currentTarget.style.color = C.textLight }}
+            >🗑</button>
+          )}
           <span style={{ color: C.textLight, fontSize: 16, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>›</span>
         </div>
       </div>

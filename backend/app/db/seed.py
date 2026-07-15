@@ -66,46 +66,83 @@ _JOIN_CONFIGS = [
 def _F(f, op, v):
     return {"f": f, "op": op, "v": v}
 
+def _rule(id_, label, color, *groups):
+    """One self-describing status rule: matches if ANY group's chips ALL
+    match (OR of ANDs). See migrate_status_rules() in engine_flex.py for
+    the full rationale — labels/colors live on the rule itself now, not in
+    a separate frontend array matched by position."""
+    return {"id": id_, "label": label, "color": color, "groups": [g for g in groups if g]}
+
 _STATUS_RULES = {
     "SWIFT_DI": [
-        [_F("TT Swift","=","thanh cong"), _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","thanh cong"), _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
-        [_F("TT Swift","=","timeout"),    _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","timeout"),    _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
-        [_F("TT Swift","=","that bai"),   _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","that bai"),   _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
-        [_F("Core","=","null")],
+        _rule("swift_di_0", "Thành công – Core ngày T", "#059669",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Thành công"), _F("Core","ne","null")]),
+        _rule("swift_di_1", "Thành công – Core ngày T+1", "#0891b2",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Thành công"), _F("Core","ne","null")]),
+        _rule("swift_di_2", "Timeout – Core ngày T", "#d97706",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Timeout"), _F("Core","ne","null")]),
+        _rule("swift_di_3", "Timeout – Core ngày T+1", "#f59e0b",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Timeout"), _F("Core","ne","null")]),
+        _rule("swift_di_4", "Thất bại – ngày T", "#6b7280",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Thất bại"), _F("Core","ne","null")]),
+        _rule("swift_di_5", "Thất bại – ngày T+1", "#9ca3af",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Thất bại"), _F("Core","ne","null")]),
+        _rule("swift_di_6", "Chỉ Swift", "#dc2626",
+              [_F("Core","=","null")]),
     ],
     "SWIFT_DEN": [
-        [_F("TT Swift","=","thanh cong"), _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","thanh cong"), _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
-        [_F("TT Swift","=","timeout"),    _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","timeout"),    _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
-        [_F("TT Swift","=","that bai"),   _F("Ngay GD","=","Ngay GN"),  _F("Core","ne","null")],
-        [_F("TT Swift","=","that bai"),   _F("Ngay GD","ne","Ngay GN"), _F("Core","ne","null")],
+        _rule("swift_den_0", "Thành công – Core ngày T", "#059669",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Thành công"), _F("Core","ne","null")]),
+        _rule("swift_den_1", "Thành công – Core ngày T+1", "#0891b2",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Thành công"), _F("Core","ne","null")]),
+        _rule("swift_den_2", "Timeout – Core ngày T", "#d97706",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Timeout"), _F("Core","ne","null")]),
+        _rule("swift_den_3", "Timeout – Core ngày T+1", "#f59e0b",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Timeout"), _F("Core","ne","null")]),
+        _rule("swift_den_4", "Thất bại – ngày T", "#6b7280",
+              [_F("Ngày GD","=","Ngày GN"), _F("TT Swift","=","Thất bại"), _F("Core","ne","null")]),
+        _rule("swift_den_5", "Thất bại – ngày T+1", "#9ca3af",
+              [_F("Ngày GD","ne","Ngày GN"), _F("TT Swift","=","Thất bại"), _F("Core","ne","null")]),
+        _rule("swift_den_6", "Chỉ Swift", "#dc2626",
+              [_F("Core","=","null")]),
     ],
     "NAPAS_DI": [
-        [_F("Ngay NAPAS","<","Ngay Core"), _F("Core","ne","null")],
-        [_F("Ngay NAPAS","=","Ngay Core"), _F("Core","ne","null")],
-        [],
-        [_F("Core","=","null")],
+        _rule("napas_di_0", "Thành công – NAPAS ngày T-1, Core ngày T", "#0891b2",
+              [_F("Ngày NAPAS","<","Ngày Core"), _F("TC/KTC","=","TC"), _F("Core","ne","null")]),
+        _rule("napas_di_1", "Thành công – NAPAS ngày T, Core ngày T", "#059669",
+              [_F("Ngày NAPAS","=","Ngày Core"), _F("TC/KTC","=","TC"), _F("Core","ne","null")]),
+        _rule("napas_di_2", "Không thành công (KTC)", "#dc2626",
+              [_F("TC/KTC","=","KTC")]),
+        _rule("napas_di_3", "Chỉ NAPAS TC – không có Core", "#d97706",
+              [_F("TC/KTC","=","TC"), _F("Core","=","null")]),
     ],
     "NAPAS_DEN": [
-        [_F("Ngay Core","<","Ngay NAPAS"), _F("Core","ne","null")],
-        [_F("Ngay Core","=","Ngay NAPAS"), _F("Core","ne","null")],
-        [_F("Ngay Core",">","Ngay NAPAS"), _F("Core","ne","null")],
+        _rule("napas_den_0", "Thành công – Core ngày T-1", "#7c3aed",
+              [_F("Ngày Core","<","Ngày NAPAS"), _F("Core","ne","null")]),
+        _rule("napas_den_1", "Thành công – Core ngày T", "#059669",
+              [_F("Ngày Core","=","Ngày NAPAS"), _F("Core","ne","null")]),
+        _rule("napas_den_2", "Thành công – Core ngày T+1", "#0891b2",
+              [_F("Ngày Core",">","Ngày NAPAS"), _F("Core","ne","null")]),
     ],
     "CORE_DI": [
-        [_F("Ngay NAPAS","<","Ngay Core"), _F("Core","ne","null")],
-        [_F("Ngay NAPAS","=","Ngay Core"), _F("Core","ne","null")],
-        [_F("Ngay NAPAS",">","Ngay Core"), _F("Core","ne","null")],
-        [_F("TT Swift","=","that bai"),    _F("Core","ne","null")],
+        _rule("core_di_0", "Swift ngày T-1 – NAPAS ngày T", "#0891b2",
+              [_F("Ngày NAPAS","<","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_di_1", "Swift ngày T – NAPAS ngày T", "#059669",
+              [_F("Ngày NAPAS","=","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_di_2", "Swift ngày T – NAPAS ngày T+1", "#7c3aed",
+              [_F("Ngày NAPAS",">","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_di_3", "Thất bại – không có trên NAPAS", "#d97706",
+              [_F("TT Swift","=","Thất bại"), _F("Core","ne","null")]),
     ],
     "CORE_DEN": [
-        [_F("Ngay NAPAS","<","Ngay Core"), _F("Core","ne","null")],
-        [_F("Ngay NAPAS","=","Ngay Core"), _F("Core","ne","null")],
-        [_F("Ngay NAPAS",">","Ngay Core"), _F("Core","ne","null")],
-        [_F("Core","ne","null"), _F("Core","=","null")],
+        _rule("core_den_0", "Core ngày T – NAPAS ngày T-1", "#0891b2",
+              [_F("Ngày NAPAS","<","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_den_1", "Core ngày T – NAPAS ngày T", "#059669",
+              [_F("Ngày NAPAS","=","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_den_2", "Core ngày T – NAPAS ngày T+1", "#7c3aed",
+              [_F("Ngày NAPAS",">","Ngày Core"), _F("Core","ne","null")]),
+        _rule("core_den_3", "Core có – không có NAPAS", "#d97706",
+              [_F("Core","=","null")]),
     ],
 }
 
@@ -423,14 +460,21 @@ def seed_flex():
 
             for t in TYPES:
                 schema_json = json.dumps(t["fields_schema"], ensure_ascii=False)
-                cur.execute("SELECT id FROM uploadedTypes WHERE system_id = ? AND upload_name = ?", system_id, t["upload_name"])
-                existing = cur.fetchone()
-                if existing:
-                    cur.execute(
-                        "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
-                        schema_json, existing[0],
-                    )
-                else:
+                type_code = t["fields_schema"]["type_code"]
+                # Match by type_code (stable, not user-editable) rather than
+                # upload_name (editable in FileTypeSettings) — matching by
+                # name meant renaming a seeded type made the seeder "lose
+                # track" of it and re-insert a fresh duplicate on next
+                # restart. Also: only INSERT when truly missing, never
+                # UPDATE an existing row — this is seed data for a fresh DB,
+                # not a sync-on-every-boot; overwriting fields_schema here
+                # was silently reverting any column customization a user
+                # made via FileTypeSettings every time the backend restarted.
+                cur.execute(
+                    "SELECT id FROM uploadedTypes WHERE system_id = ? AND JSON_VALUE(fields_schema, '$.type_code') = ?",
+                    system_id, type_code,
+                )
+                if not cur.fetchone():
                     cur.execute(
                         "INSERT INTO uploadedTypes (system_id, file_type_id, upload_name, fields_schema, is_active, created, created_by) VALUES (?, ?, ?, ?, 1, GETDATE(), 'system')",
                         system_id, file_type_id, t["upload_name"], schema_json,

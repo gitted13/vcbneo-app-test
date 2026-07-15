@@ -37,9 +37,24 @@ const STATUS_META = {
   CHI_PHAI:             { label: 'Chỉ nguồn phải',     color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
 }
 
+// Populated once from GET /status-rules — DateRules rules now carry their
+// own color (self-describing, see engine_flex.py's migrate_status_rules),
+// so a freshly-classified result's `status` is the rule's human label
+// directly (e.g. "Thành công – Core ngày T"), not a fixed code. STATUS_META
+// above stays as a fallback for older reconcileResults rows computed before
+// this change, which still carry the old internal codes (e.g. "TC_KHOP").
+let _dynamicStatusColors = {}
+
+function _hexTint(hex, alphaHex) {
+  return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex + alphaHex : undefined
+}
+
 function statusMeta(code) {
   if (!code) return { label: code ?? '—', color: C.textMuted, bg: C.neutralBg, border: C.cardBorder }
-  return STATUS_META[code] ?? { label: code, color: C.textMuted, bg: C.neutralBg, border: C.cardBorder }
+  if (STATUS_META[code]) return STATUS_META[code]
+  const dyn = _dynamicStatusColors[code]
+  if (dyn) return { label: code, color: dyn, bg: _hexTint(dyn, '1a') ?? C.neutralBg, border: _hexTint(dyn, '4d') ?? C.cardBorder }
+  return { label: code, color: C.textMuted, bg: C.neutralBg, border: C.cardBorder }
 }
 
 /* ── Column definitions per config ───────────────────────────────────────── */
@@ -432,6 +447,17 @@ export default function Reconcile() {
       })
       .catch(() => toast('Không thể tải cấu hình đối soát.', 'error'))
       .finally(() => setLoading(false))
+
+    // Populate the dynamic label→color map for statusMeta() (see comment above it)
+    api.reconcileConfig.getStatusRules()
+      .then(res => {
+        const map = {}
+        Object.values(res.rules || {}).forEach(rules => {
+          (rules || []).forEach(r => { if (r?.label && r?.color) map[r.label] = r.color })
+        })
+        _dynamicStatusColors = map
+      })
+      .catch(() => {})
   }, [])
 
   const loadSummary = useCallback((configId, runDate) => {
