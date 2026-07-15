@@ -5,6 +5,7 @@ import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
 import { useApp } from '../../context/AppContext'
+import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
 
@@ -38,9 +39,9 @@ export default function DataInput() {
   const [dbTypes, setDbTypes] = useState([])
   const TABS = ['Tải lên thủ công', 'Lịch sử tải lên']
 
-  useEffect(() => {
-    api.flex.getTypes('reconcile').then(setDbTypes).catch(() => {})
-  }, [])
+  const reloadTypes = () => api.flex.getTypes('reconcile').then(setDbTypes).catch(() => {})
+
+  useEffect(() => { reloadTypes() }, [])
 
   return (
     <PageShell
@@ -48,14 +49,18 @@ export default function DataInput() {
       subtitle="Tải file thủ công hoặc xem lịch sử nạp dữ liệu. File sẽ được kiểm tra theo cấu hình loại file."
     >
       <TabBar tabs={TABS} active={activeTab} onChange={setActiveTab} />
-      {activeTab === 0 ? <ManualTab dbTypes={dbTypes} /> : <HistoryTab dbTypes={dbTypes} />}
+      {activeTab === 0
+        ? <ManualTab dbTypes={dbTypes} onReloadTypes={reloadTypes} />
+        : <HistoryTab dbTypes={dbTypes} onReloadTypes={reloadTypes} />}
     </PageShell>
   )
 }
 
 /* ── Manual Tab ─────────────────────────────────────────────────────────────── */
-function ManualTab({ dbTypes }) {
-  const { toast } = useApp()
+function ManualTab({ dbTypes, onReloadTypes }) {
+  const { toast, showConfirm } = useApp()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin'
   const [files, setFiles]       = useState({})   // id → { file, name, size }
   const [results, setResults]   = useState({})   // id → upload result | { _error }
   const [uploading, setUploading] = useState(new Set())
@@ -66,6 +71,21 @@ function ManualTab({ dbTypes }) {
     color: PALETTE[i % PALETTE.length],
     schema: t.fields_schema || {},
   }))
+
+  const handleWipeType = (ft) => showConfirm({
+    title: `Xóa toàn bộ dữ liệu "${ft.name}"?`,
+    message: 'Toàn bộ dữ liệu đã tải lên và kết quả đối soát liên quan tới loại file này sẽ bị xóa vĩnh viễn. Không thể hoàn tác.',
+    variant: 'danger',
+    confirmLabel: 'Xóa dữ liệu',
+    onConfirm: () => {
+      api.flex.purge(ft.id)
+        .then(() => {
+          setResults(prev => { const n = { ...prev }; delete n[ft.id]; return n })
+          toast(`Đã xóa toàn bộ dữ liệu của "${ft.name}".`, 'success')
+        })
+        .catch(e => toast(`Xóa thất bại: ${e.message}`, 'error'))
+    },
+  })
 
   const handleDrop = (id, f) => {
     if (f === null) {
@@ -107,7 +127,13 @@ function ManualTab({ dbTypes }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <Button size="sm" variant="ghost" onClick={onReloadTypes} title="Nạp lại cấu hình loại file mới nhất từ Cấu hình loại file">
+          Làm mới cấu hình
+        </Button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
       {fileTypes.map(ft => (
         <UploadSlot
           key={ft.id}
@@ -115,19 +141,23 @@ function ManualTab({ dbTypes }) {
           fileInfo={files[ft.id]}
           result={results[ft.id]}
           uploading={uploading.has(ft.id)}
+          isAdmin={isAdmin}
           onDrop={(f) => handleDrop(ft.id, f)}
           onUpload={() => handleUploadOne(ft)}
+          onWipe={() => handleWipeType(ft)}
         />
       ))}
+      </div>
     </div>
   )
 }
 
-function UploadSlot({ ft, fileInfo, result, uploading, onDrop, onUpload }) {
+function UploadSlot({ ft, fileInfo, result, uploading, isAdmin, onDrop, onUpload, onWipe }) {
   const columns  = ft.schema?.columns || []
   const fromFile = columns.filter(c => c.col_name)
   const fixed    = columns.filter(c => c.fixed_value != null && c.fixed_value !== '')
   const required = fromFile.filter(c => c.required)
+  const withAllowedValues = fromFile.filter(c => Array.isArray(c.allowed_values) && c.allowed_values.length > 0)
 
   const [dragging, setDragging] = useState(false)
 
@@ -157,6 +187,15 @@ function UploadSlot({ ft, fileInfo, result, uploading, onDrop, onUpload }) {
         {resultOk   && <Badge variant="success" dot>Đã tải</Badge>}
         {resultWarn && <Badge variant="warning" dot>{result.error_count} cảnh báo</Badge>}
         {resultErr  && <Badge variant="error"   dot>Lỗi</Badge>}
+        {isAdmin && (
+          <button
+            onClick={onWipe}
+            title={`Xóa toàn bộ dữ liệu đã tải của "${ft.name}"`}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 13, padding: '0 2px', lineHeight: 1 }}
+            onMouseEnter={e => { e.currentTarget.style.color = C.error }}
+            onMouseLeave={e => { e.currentTarget.style.color = C.textLight }}
+          >🗑</button>
+        )}
       </div>
 
       {/* Schema info from DB */}
@@ -174,6 +213,16 @@ function UploadSlot({ ft, fileInfo, result, uploading, onDrop, onUpload }) {
                 <span style={{ color: C.error, fontWeight: 700 }}>* </span>
                 <span style={{ color: C.textMuted }}>Bắt buộc: </span>
                 <span style={{ color: C.text, fontWeight: 500 }}>{required.map(c => c.col_name).join(', ')}</span>
+              </div>
+            )}
+            {withAllowedValues.length > 0 && (
+              <div style={{ marginTop: 3 }}>
+                <span style={{ color: C.textMuted }}>Giá trị hợp lệ: </span>
+                {withAllowedValues.map(c => (
+                  <span key={c.field_name} style={{ color: C.text }}>
+                    {c.col_name} (<span style={{ fontFamily: 'monospace' }}>{c.allowed_values.join(', ')}</span>){c !== withAllowedValues[withAllowedValues.length - 1] ? '; ' : ''}
+                  </span>
+                ))}
               </div>
             )}
           </>
@@ -258,7 +307,10 @@ function UploadSlot({ ft, fileInfo, result, uploading, onDrop, onUpload }) {
 }
 
 /* ── History Tab ─────────────────────────────────────────────────────────────── */
-function HistoryTab({ dbTypes }) {
+function HistoryTab({ dbTypes, onReloadTypes }) {
+  const { toast, showConfirm } = useApp()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin'
   const [rows, setRows]           = useState([])
   const [loading, setLoading]     = useState(true)
   const [filterType, setFilterType] = useState('')
@@ -276,6 +328,30 @@ function HistoryTab({ dbTypes }) {
   }
 
 useEffect(() => { load() }, [])
+
+  const handleDeleteFile = (r) => showConfirm({
+    title: `Xóa file "${r.original_name}"?`,
+    message: 'File này sẽ bị loại khỏi lịch sử và dữ liệu đối soát liên quan. Không thể hoàn tác.',
+    variant: 'danger',
+    confirmLabel: 'Xóa',
+    onConfirm: () => {
+      api.flex.deleteFile(r.id)
+        .then(() => { load(); toast(`Đã xóa file "${r.original_name}".`, 'success') })
+        .catch(e => toast(`Xóa thất bại: ${e.message}`, 'error'))
+    },
+  })
+
+  const handleWipeAll = () => showConfirm({
+    title: 'Xóa TOÀN BỘ dữ liệu đã tải lên?',
+    message: 'Thao tác này xóa vĩnh viễn toàn bộ dữ liệu đã tải (mọi loại file) và toàn bộ kết quả đối soát đã chạy. Không thể hoàn tác.',
+    variant: 'danger',
+    confirmLabel: 'Xóa tất cả',
+    onConfirm: () => {
+      api.flex.purge()
+        .then(() => { load(); onReloadTypes?.(); toast('Đã xóa toàn bộ dữ liệu đã tải lên.', 'success') })
+        .catch(e => toast(`Xóa thất bại: ${e.message}`, 'error'))
+    },
+  })
 
   const typeNames = [...new Set(rows.map(r => r.upload_name).filter(Boolean))]
 
@@ -305,8 +381,13 @@ useEffect(() => { load() }, [])
             <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>{s.label}</div>
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
           <Button size="sm" variant="ghost" onClick={load}>Làm mới</Button>
+          {isAdmin && (
+            <Button size="sm" variant="ghost" onClick={handleWipeAll} style={{ color: C.error }}>
+              Xóa toàn bộ dữ liệu
+            </Button>
+          )}
         </div>
       </div>
 
@@ -334,7 +415,7 @@ useEffect(() => { load() }, [])
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                {['Thời gian', 'Loại file', 'Tên file', 'Người dùng', 'Số dòng', 'Trạng thái'].map(h => (
+                {['Thời gian', 'Loại file', 'Tên file', 'Người dùng', 'Số dòng', 'Trạng thái', ''].map(h => (
                   <th key={h} style={{ padding: '9px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}`, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -344,7 +425,7 @@ useEffect(() => { load() }, [])
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '32px 0', textAlign: 'center', color: C.textLight, fontSize: 13 }}>
+                  <td colSpan={7} style={{ padding: '32px 0', textAlign: 'center', color: C.textLight, fontSize: 13 }}>
                     Chưa có file nào được tải lên
                   </td>
                 </tr>
@@ -368,6 +449,17 @@ useEffect(() => { load() }, [])
                       <Badge variant={r.status === 'ok' ? 'success' : 'error'} dot>
                         {r.status === 'ok' ? 'Hợp lệ' : 'Lỗi'}
                       </Badge>
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      {isAdmin && (
+                        <button
+                          onClick={() => handleDeleteFile(r)}
+                          title={`Xóa file "${r.original_name}"`}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 13 }}
+                          onMouseEnter={e => { e.currentTarget.style.color = C.error }}
+                          onMouseLeave={e => { e.currentTarget.style.color = C.textLight }}
+                        >🗑</button>
+                      )}
                     </td>
                   </tr>
                 )

@@ -168,7 +168,7 @@ def purge_uploaded_data(type_id: int | None = None):
             if not cur.fetchone():
                 raise HTTPException(404, f"type_id={type_id} không tồn tại")
             cur.execute(
-                "DELETE FROM uploadedFileRows WHERE file_id IN (SELECT id FROM uploadedFiles WHERE upload_type_id = ?)",
+                "DELETE FROM uploadedFileRows WHERE upload_file_id IN (SELECT id FROM uploadedFiles WHERE upload_type_id = ?)",
                 type_id,
             )
             rows_deleted = cur.rowcount

@@ -23,11 +23,13 @@ function isNumType(col) {
   return col.data_type === 'number' || col.data_type === 'integer'
 }
 
-// "Giờ GD" (giờ_gd) is stored as an HHMMSS integer (e.g. 92425 = 09:24:25),
-// not a plain quantity — must not fall into the thousands-grouped number
-// formatting below, or it renders as "92.425" instead of a time.
+// "Giờ GD" (giờ_gd, NAPAS) and "PCTIME" (Swift đi/đến) are both stored as
+// HHMMSS integers/strings (e.g. 92425 = 09:24:25), not plain quantities or
+// real dates — must not fall into thousands-grouped number formatting or
+// the date formatter below, or they render as "92.425" / raw digits.
+const TIME_FIELDS = ['giờ_gd', 'pctime']
 function isTimeField(col) {
-  return col.field_name === 'giờ_gd'
+  return TIME_FIELDS.includes(col.field_name)
 }
 
 function formatTime(val) {
@@ -41,11 +43,36 @@ function isStatusCol(col) {
   return Array.isArray(col.allowed_values) && col.allowed_values.length > 0
 }
 
-function formatDate(val) {
+// Parses every raw date shape actually seen across the 6 file types into
+// {y, mo, d, h?, mi?, se?}. NAPAS ships "Ngày GD" as MMDD/MDD with no year
+// (e.g. "0203") — assumed to be the current year, same convention already
+// used by the date-range filter below.
+function parseFlexDate(val) {
   const s = String(val ?? '').trim()
-  if (s.length === 8 && /^\d{8}$/.test(s))
-    return `${s.slice(6, 8)}/${s.slice(4, 6)}/${s.slice(0, 4)}`
-  return s
+  if (!s) return null
+  let m
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)))
+    return { y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5], se: +m[6] }
+  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/)))
+    return { y: +m[1], mo: +m[2], d: +m[3] }
+  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)))
+    return { y: +m[1], mo: +m[2], d: +m[3] }
+  if ((m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)))
+    return { y: +m[3], mo: +m[2], d: +m[1] }
+  if (/^\d{3,4}$/.test(s)) {
+    const padded = s.padStart(4, '0')
+    return { y: new Date().getFullYear(), mo: +padded.slice(0, 2), d: +padded.slice(2, 4) }
+  }
+  return null
+}
+
+function formatDate(val) {
+  const p = parseFlexDate(val)
+  if (!p) return String(val ?? '')
+  const dd = String(p.d).padStart(2, '0'), mm = String(p.mo).padStart(2, '0')
+  let out = `${dd}/${mm}/${p.y}`
+  if (p.h != null) out += ` ${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')}:${String(p.se).padStart(2, '0')}`
+  return out
 }
 
 function StatusChip({ value }) {
@@ -72,11 +99,14 @@ function CellValue({ value, col }) {
   if (isStatusCol(col))
     return <StatusChip value={value} />
 
-  if (isDateType(col))
-    return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatDate(value)}</span>
-
+  // Checked before isDateType: some columns are schema'd "date"/"datetime"
+  // but actually hold a time-of-day value (e.g. Swift's pctime) — must win
+  // the dispatch or they'd be parsed as dates and shown raw/wrong.
   if (isTimeField(col))
     return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatTime(value)}</span>
+
+  if (isDateType(col))
+    return <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{formatDate(value)}</span>
 
   if (isNumType(col)) {
     const n = Number(String(value).replace(/,/g, ''))
@@ -129,20 +159,17 @@ export default function DataStorage() {
   const allCols     = (schema.columns || [])
   const displayCols = allCols  // show all cols including fixed_value
 
-  // Detect first date column in active schema
-  const dateCol = allCols.find(c => c.data_type === 'date' || c.data_type === 'datetime')
+  // Detect first real date column in active schema (excluding columns that
+  // are schema'd "date" but actually hold a time value, e.g. pctime).
+  const dateCol = allCols.find(c => isDateType(c) && !isTimeField(c))
 
-  // Parse heterogeneous date formats to ISO yyyy-mm-dd for range comparison
+  // Parse heterogeneous date formats to ISO yyyy-mm-dd for range comparison.
+  // Shares parseFlexDate with the display formatter so filtering and what's
+  // shown on screen always agree on what date a raw value represents.
   function toISO(val) {
-    if (val == null) return null
-    const s = String(val).trim()
-    if (!s) return null
-    if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`   // YYYYMMDD
-    if (/^\d{4}$/.test(s)) return `2026-${s.slice(0,2)}-${s.slice(2,4)}`               // MMDD
-    if (/^\d{3}$/.test(s)) return `2026-0${s.slice(0,1)}-${s.slice(1,3)}`              // MDD
-    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return `${s.slice(6)}-${s.slice(3,5)}-${s.slice(0,2)}` // dd/mm/yyyy
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)                            // ISO
-    return null
+    const p = parseFlexDate(val)
+    if (!p) return null
+    return `${p.y}-${String(p.mo).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`
   }
 
   const filtered = useMemo(() => {

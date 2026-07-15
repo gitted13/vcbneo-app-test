@@ -6,6 +6,7 @@ async function request(path, options = {}) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(body.detail ?? res.statusText)
   }
+  if (res.status === 204) return null
   return res.json()
 }
 
@@ -143,5 +144,6 @@ export const api = {
       const params = typeId != null ? `?type_id=${typeId}` : ''
       return request(`/flex/purge${params}`, { method: 'DELETE' })
     },
+    deleteFile: (fileId) => request(`/flex/files/${fileId}`, { method: 'DELETE' }),
   },
 }

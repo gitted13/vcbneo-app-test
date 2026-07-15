@@ -310,7 +310,7 @@ function LogicFormModal({ open, editing, onClose, onSave }) {
     matchFields: [{ left: 'trace', right: 'trace' }, { left: 'amount', right: 'amount' }],
   }
   const [form, setForm] = useState(() => editing ?? blank)
-  useState(() => { if (open) setForm(editing ?? blank) })
+  useEffect(() => { if (open) setForm(editing ?? blank) }, [open, editing])
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const autoName = `${form.leftSource} vs ${form.rightSource}`
