@@ -221,6 +221,37 @@ Seed chạy mỗi lần backend khởi động — UPSERT: nếu đã tồn tạ
 - API calls qua `frontend/src/api/client.js` → namespace `api.flex.*`
 - Components dùng chung: `Modal`, `Button`, `Input`, `Select`, `FormRow`, `Badge`, `PageShell`
 
+### Pagination — hard rule cho mọi bảng dữ liệu
+
+Mọi `<table>` hiển thị danh sách bản ghi (upload, giao dịch, kết quả đối soát, người dùng, v.v.) **bắt buộc** dùng component `frontend/src/components/Pagination.jsx`:
+
+```jsx
+import Pagination from '../../components/Pagination'
+
+const [page, setPage]         = useState(1)
+const [pageSize, setPageSize] = useState(20)   // chọn 10/20/30/50 tùy độ "nặng" của bảng
+const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize)
+// render pageRows trong <tbody>, KHÔNG render filtered/rows trực tiếp
+
+<Pagination
+  total={filtered.length}
+  page={page}
+  pageSize={pageSize}
+  onPage={setPage}
+  onPageSize={setPageSize}
+  itemLabel="dòng"   // hoặc "bản ghi" / "giao dịch" / "người dùng" — danh từ khớp ngữ cảnh
+/>
+```
+
+- Page size cố định `[10, 20, 30, 50, 75, 100]` (`PAGE_SIZE_OPTIONS` trong Pagination.jsx) — không tự chế danh sách khác.
+- Component tự có ô nhập số trang (nhảy thẳng tới trang bất kỳ), không cần tự làm lại.
+- Bất cứ khi nào search/filter thay đổi, phải `setPage(1)` kèm theo — nếu không trang hiện tại có thể trống dù còn dữ liệu ở trang 1.
+- **Ngoại lệ có chủ đích** — bảng cấu hình kích thước cố định nhỏ (≤ ~20 dòng theo thiết kế, không phải danh sách bản ghi tăng dần) không cần phân trang vì chỉ gây rối UI mà không có lợi ích gì: bảng cột trong `FileTypeSettings`, bảng điều kiện trạng thái trong `DateRules`, bảng KPI 2 dòng trong `Reports`. Nếu một bảng "cố định nhỏ" sau này đổi sang hiển thị danh sách có thể tăng không giới hạn, phải thêm `Pagination` ngay khi đổi.
+- **"Lazy loading" (giảm thời gian tải)** — 3 chiến lược khác nhau tùy đặc điểm endpoint, không phải một khuôn mẫu duy nhất:
+  1. **Server-side pagination + search** (`GET /flex/rows`, `GET /flex/files`) — dùng khi filter là so sánh field/value đơn giản, portable sang backend an toàn. Client gọi `api.flex.getRows(typeId, {page, pageSize, search, dateField, dateFrom, dateTo})` / `api.flex.getFiles(typeId, {page, pageSize, search, status})`, nhận về `{rows, total, ...}` — chỉ `page_size` dòng qua wire, không phải toàn bộ dataset. Ô tìm kiếm debounce 350ms trước khi gọi API. Đây là **mẫu chuẩn** khi thêm phân trang server-side cho bảng mới có filter đơn giản.
+  2. **Server-side result caching** (`GET /reconcile/db-rows`, dùng bởi `Đối soát` — thực ra dùng bởi `CoreSummary`/`NapasCore`/`SwiftCore`/`MasterSummary`) — **KHÔNG** dùng pagination vì lý do kiến trúc: 4 trang này lọc theo `filterFn` — closure JS tùy ý định nghĩa trong `frontend/src/data/reconcile.js`, phụ thuộc `recon_status`/trạng thái resolve — không portable sang backend mà không nhân đôi logic phân loại nghiệp vụ cốt lõi (rủi ro sai lệch số liệu đối soát nếu 2 bản logic lệch nhau). Chi phí thật của endpoint này là **tính toán** (join lại toàn bộ 6 loại file trong `_build_from_db()`, ~1.7s với ~15k dòng), không phải kích thước payload — nên phương án đúng là cache kết quả tính (`unified_db_builder._db_rows_cache`), xóa cache ở **mọi** điểm ghi dữ liệu ảnh hưởng tới join (upload/purge/xóa file/sửa schema loại file/sửa-tạo-xóa join config — xem toàn bộ lệnh gọi `clear_db_rows_cache()` trong `flex/router.py` và `reconciliation/router.py`). Đã đo thực tế: 1.73s (cache miss) → ~0.52s (cache hit), và xác nhận cache tự xóa đúng khi patch 1 join config.
+  3. **Chưa xử lý, để nguyên client-side** — `GET /reconcile/flex-results` (trang `Đối soát`, `ResultsPanel`). Dataset bị giới hạn theo (config_id, run_date) — một cặp nguồn, một ngày — nên nhỏ hơn nhiều so với 2 endpoint trên (không phải toàn bộ lịch sử). Việc chuyển sang server-side sẽ đụng vào luồng ghi chú/resolve (`onPatch`) đang gắn chặt với state `results` ở component cha `Reconcile`, rủi ro cao hơn lợi ích đo được — quyết định có chủ đích, không phải bỏ sót.
+
 ---
 
 ## Quy trình vận hành hàng ngày

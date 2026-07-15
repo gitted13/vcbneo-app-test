@@ -9,7 +9,8 @@ import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from app.db.connection import db_cursor
-from app.modules.reconciliation.engine_flex import mark_stale_by_type, clear_type_id_cache
+from app.modules.reconciliation.engine_flex import mark_stale_by_type, mark_stale_all, clear_type_id_cache
+from app.modules.reconciliation.unified_db_builder import clear_db_rows_cache
 
 router = APIRouter()
 
@@ -116,13 +117,20 @@ def update_type(type_id: int, body: dict) -> dict:
             raise HTTPException(404, "Type not found")
     clear_type_id_cache()
     mark_stale_by_type(type_id)
+    clear_db_rows_cache()
     return {"ok": True}
 
 
 # ── Files ─────────────────────────────────────────────────────────────────────
 
 @router.get("/files")
-def list_files(type_id: int | None = Query(None)) -> list[dict]:
+def list_files(
+    type_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=500),
+    search: str | None = Query(None),
+    status: str | None = Query(None),
+) -> dict[str, Any]:
     _base = """
         SELECT f.id, f.upload_type_id, t.upload_name, t.fields_schema,
                f.original_name, f.is_active, f.error_detail,
@@ -134,9 +142,9 @@ def list_files(type_id: int | None = Query(None)) -> list[dict]:
     """
     with db_cursor() as cur:
         if type_id:
-            cur.execute(_base + " WHERE f.upload_type_id = ? ORDER BY f.created DESC", type_id)
+            cur.execute(_base + " WHERE f.upload_type_id = ? AND f.is_active = 1 ORDER BY f.created DESC", type_id)
         else:
-            cur.execute(_base + " ORDER BY f.created DESC")
+            cur.execute(_base + " WHERE f.is_active = 1 ORDER BY f.created DESC")
         cols = _cols(cur)
         rows = []
         for r in cur.fetchall():
@@ -151,7 +159,33 @@ def list_files(type_id: int | None = Query(None)) -> list[dict]:
                 d["type_code"] = ""
             d["status"] = "ok" if d.get("error_detail") is None else "error"
             rows.append(d)
-        return rows
+
+        # Stat-tile counts reflect the type_id scope (if any) but ignore
+        # search/status so the tiles above the table don't shift as you type.
+        total_all   = len(rows)
+        total_ok    = sum(1 for r in rows if r["status"] == "ok")
+        total_error = total_all - total_ok
+
+        if status in ("ok", "error"):
+            rows = [r for r in rows if r["status"] == status]
+
+        if search and search.strip():
+            q = search.strip().lower()
+            rows = [
+                r for r in rows
+                if q in str(r.get("original_name") or "").lower()
+                or q in str(r.get("upload_name") or "").lower()
+            ]
+
+        total = len(rows)
+        start = (page - 1) * page_size
+        return {
+            "rows": rows[start:start + page_size],
+            "total": total,
+            "total_all": total_all,
+            "total_ok": total_ok,
+            "total_error": total_error,
+        }
 
 
 # ── File management ───────────────────────────────────────────────────────────
@@ -187,6 +221,7 @@ def purge_uploaded_data(type_id: int | None = None):
             cur.execute("DELETE FROM reconcileResults")
             results_deleted = cur.rowcount
     mark_stale_all()
+    clear_db_rows_cache()
     return {
         "ok": True,
         "type_id": type_id,
@@ -209,6 +244,7 @@ def delete_file(file_id: int):
         type_id = row[1]
         cur.execute("UPDATE uploadedFiles SET is_active = 0, modified = GETDATE() WHERE id = ?", file_id)
     mark_stale_by_type(type_id)
+    clear_db_rows_cache()
     return {"ok": True, "file_id": file_id}
 
 
@@ -380,6 +416,7 @@ async def upload_file(
             saved_count += 1
 
     mark_stale_by_type(type_id)
+    clear_db_rows_cache()
     return {
         "file_id":        file_id,
         "row_count":      saved_count,
@@ -709,8 +746,44 @@ async def scan_file(file: UploadFile = File(...)) -> dict:
 
 # ── Rows ──────────────────────────────────────────────────────────────────────
 
+def _parse_flex_date_iso(val: Any) -> str | None:
+    """Mirrors frontend/src/pages/DataStorage/index.jsx's parseFlexDate() —
+    keep both in sync. Used for server-side date-range filtering so paginated
+    results match what the client would have filtered locally before."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[ T]\d{2}:\d{2}:\d{2}", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})$", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", s)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    if re.match(r"^\d{3,4}$", s):
+        padded = s.zfill(4)
+        year = datetime.date.today().year
+        return f"{year}-{padded[:2]}-{padded[2:]}"
+    return None
+
+
 @router.get("/rows")
-def get_rows(type_id: int = Query(...)) -> list[dict[str, Any]]:
+def get_rows(
+    type_id: int = Query(...),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    search: str | None = Query(None),
+    date_field: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+) -> dict[str, Any]:
     with db_cursor() as cur:
         cur.execute(
             "SELECT fields_schema FROM uploadedTypes WHERE id = ?", type_id
@@ -760,4 +833,27 @@ def get_rows(type_id: int = Query(...)) -> list[dict[str, Any]]:
                 parsed.update(data_row)
             result.append(parsed)
 
-        return result
+        raw_total = len(result)
+
+        if search and search.strip():
+            q = search.strip().lower()
+            result = [
+                r for r in result
+                if any(q in str(v).lower() for v in r.values() if v is not None)
+            ]
+
+        if date_field and (date_from or date_to):
+            def _in_range(r: dict) -> bool:
+                iso = _parse_flex_date_iso(r.get(date_field))
+                if iso is None:
+                    return True  # unparseable — don't hide the row, matches prior client behavior
+                if date_from and iso < date_from:
+                    return False
+                if date_to and iso > date_to:
+                    return False
+                return True
+            result = [r for r in result if _in_range(r)]
+
+        total = len(result)
+        start = (page - 1) * page_size
+        return {"rows": result[start:start + page_size], "total": total, "raw_total": raw_total}

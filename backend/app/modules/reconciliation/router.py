@@ -14,7 +14,7 @@ from app.modules.reconciliation.engine_flex import (
 )
 from app.modules.reconciliation.service import get_results
 from app.modules.reconciliation.rows_builder import get_rows, clear_rows_cache
-from app.modules.reconciliation.unified_db_builder import get_db_rows
+from app.modules.reconciliation.unified_db_builder import get_db_rows, clear_db_rows_cache
 
 router = APIRouter()
 
@@ -131,6 +131,7 @@ def create_join_config(body: JoinConfigBody):
             config_json, body.created_by,
         )
         new_id = cur.fetchone()[0]
+    clear_db_rows_cache()
     return {"id": new_id, "config": body.config}
 
 
@@ -143,6 +144,7 @@ def update_join_config(config_id: int = Path(...), body: JoinConfigBody = ...):
             raise HTTPException(status_code=404, detail="Config not found")
         cur.execute("UPDATE reconcileJoinConfigs SET config_json = ? WHERE id = ?", config_json, config_id)
     mark_stale_by_config(config_id)
+    clear_db_rows_cache()
     return {"id": config_id, "config": body.config}
 
 
@@ -153,6 +155,7 @@ def delete_join_config(config_id: int = Path(...)):
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Config not found")
         cur.execute("UPDATE reconcileJoinConfigs SET is_active = 0 WHERE id = ?", config_id)
+    clear_db_rows_cache()
 
 
 # ── Status Rules ───────────────────────────────────────────────────────────────

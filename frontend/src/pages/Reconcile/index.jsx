@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import PageShell from '../../components/PageShell'
 import Button from '../../components/Button'
 import { Input } from '../../components/Input'
+import Pagination from '../../components/Pagination'
 import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
 import { useApp } from '../../context/AppContext'
@@ -173,12 +174,11 @@ function ConfigCard({ cfg, summary, running, onRun, onSelect, active }) {
 }
 
 /* ── Results Panel ────────────────────────────────────────────────────────── */
-const PAGE_SIZE = 50
-
 function ResultsPanel({ cfg, results, summary, runDates, selectedDate, onDateChange, onPatch, canAnnotate }) {
   const [search, setSearch]       = useState('')
   const [filterStatus, setFS]     = useState('')
   const [page, setPage]           = useState(1)
+  const [pageSize, setPageSize]   = useState(50)
   const [annotating, setAnn]      = useState(null) // result id
   const [noteInput, setNote]      = useState('')
   const [patchingId, setPId]      = useState(null)
@@ -200,8 +200,8 @@ function ResultsPanel({ cfg, results, summary, runDates, selectedDate, onDateCha
     return true
   })
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
-  const pageRows   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const pageRows   = filtered.slice((page - 1) * pageSize, page * pageSize)
 
   const handlePatch = async (id, patch) => {
     setPId(id)
@@ -310,7 +310,7 @@ function ResultsPanel({ cfg, results, summary, runDates, selectedDate, onDateCha
               return (
                 <>
                   <tr key={r.id} style={{ background: idx % 2 ? C.neutralBg : '#fff' }}>
-                    <td style={td({ color: C.textMuted, textAlign: 'right', width: 40 })}>{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                    <td style={td({ color: C.textMuted, textAlign: 'right', width: 40 })}>{(page - 1) * pageSize + idx + 1}</td>
 
                     {cols.left.map(c => (
                       <td key={c.k} style={td({ background: idx % 2 ? '#f0f5ff' : '#f8fbff', fontFamily: c.fmt === 'amt' ? 'monospace' : 'inherit' })}>
@@ -391,27 +391,14 @@ function ResultsPanel({ cfg, results, summary, runDates, selectedDate, onDateCha
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.cardBorder}`, display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-            style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${C.cardBorder}`, background: '#fff', cursor: 'pointer', fontSize: 12, color: page === 1 ? C.textLight : C.text }}>
-            ‹
-          </button>
-          {Array.from({ length: Math.min(7, totalPages) }, (_, i) => {
-            const pg = totalPages <= 7 ? i + 1 : Math.max(1, Math.min(totalPages - 6, page - 3)) + i
-            return (
-              <button key={pg} onClick={() => setPage(pg)}
-                style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${pg === page ? C.primary : C.cardBorder}`, background: pg === page ? C.primary : '#fff', cursor: 'pointer', fontSize: 12, color: pg === page ? '#fff' : C.text }}>
-                {pg}
-              </button>
-            )
-          })}
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-            style={{ padding: '4px 10px', borderRadius: 4, border: `1px solid ${C.cardBorder}`, background: '#fff', cursor: 'pointer', fontSize: 12, color: page === totalPages ? C.textLight : C.text }}>
-            ›
-          </button>
-        </div>
-      )}
+      <Pagination
+        total={filtered.length}
+        page={page}
+        pageSize={pageSize}
+        onPage={setPage}
+        onPageSize={setPageSize}
+        itemLabel="dòng"
+      />
     </div>
   )
 }

@@ -4,6 +4,7 @@ import Card from '../../components/Card'
 import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
+import Pagination from '../../components/Pagination'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
@@ -311,23 +312,33 @@ function HistoryTab({ dbTypes, onReloadTypes }) {
   const { toast, showConfirm } = useApp()
   const { user } = useAuth()
   const isAdmin = user?.role === 'Admin'
-  const [rows, setRows]           = useState([])
+  const [rows, setRows]           = useState([])         // current page only
+  const [totals, setTotals]       = useState({ total: 0, total_all: 0, total_ok: 0, total_error: 0 })
   const [loading, setLoading]     = useState(true)
-  const [filterType, setFilterType] = useState('')
+  const [filterTypeId, setFilterTypeId] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [search, setSearch]       = useState('')
+  const [search, setSearch]       = useState('')           // controlled input (instant)
+  const [debouncedSearch, setDSearch] = useState('')         // sent to server
+  const [page, setPage]           = useState(1)
+  const [pageSize, setPageSize]   = useState(20)
 
   const typeColorMap = Object.fromEntries(dbTypes.map((t, i) => [t.id, PALETTE[i % PALETTE.length]]))
 
   const load = () => {
     setLoading(true)
-    api.flex.getFiles()
-      .then(setRows)
-      .catch(() => setRows([]))
+    api.flex.getFiles(filterTypeId || null, { page, pageSize, search: debouncedSearch, status: filterStatus })
+      .then(res => { setRows(res.rows); setTotals(res) })
+      .catch(() => { setRows([]); setTotals({ total: 0, total_all: 0, total_ok: 0, total_error: 0 }) })
       .finally(() => setLoading(false))
   }
 
-useEffect(() => { load() }, [])
+  // Debounce search 350ms so it feels instant without a request per keystroke
+  useEffect(() => {
+    const t = setTimeout(() => { setDSearch(search); setPage(1) }, 350)
+    return () => clearTimeout(t)
+  }, [search])
+
+  useEffect(() => { load() }, [filterTypeId, filterStatus, debouncedSearch, page, pageSize])
 
   const handleDeleteFile = (r) => showConfirm({
     title: `Xóa file "${r.original_name}"?`,
@@ -354,23 +365,10 @@ useEffect(() => { load() }, [])
     },
   })
 
-  const typeNames = [...new Set(rows.map(r => r.upload_name).filter(Boolean))]
-
-  const filtered = rows.filter(r => {
-    if (filterType && r.upload_name !== filterType) return false
-    if (filterStatus === 'ok'    && r.status !== 'ok')  return false
-    if (filterStatus === 'error' && r.status === 'ok')  return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!r.original_name?.toLowerCase().includes(q) && !r.upload_name?.toLowerCase().includes(q)) return false
-    }
-    return true
-  })
-
   const stats = [
-    { label: 'Tổng file', val: rows.length,                               color: C.primary, bg: 'linear-gradient(135deg,#eff6ff,#dbeafe)', border: '#bfdbfe' },
-    { label: 'Hợp lệ',    val: rows.filter(r => r.status === 'ok').length, color: C.success, bg: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '#bbf7d0' },
-    { label: 'Lỗi',       val: rows.filter(r => r.status !== 'ok').length, color: C.error,   bg: 'linear-gradient(135deg,#fef2f2,#fee2e2)', border: '#fecaca' },
+    { label: 'Tổng file', val: totals.total_all,   color: C.primary, bg: 'linear-gradient(135deg,#eff6ff,#dbeafe)', border: '#bfdbfe' },
+    { label: 'Hợp lệ',    val: totals.total_ok,    color: C.success, bg: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '#bbf7d0' },
+    { label: 'Lỗi',       val: totals.total_error, color: C.error,   bg: 'linear-gradient(135deg,#fef2f2,#fee2e2)', border: '#fecaca' },
   ]
 
   return (
@@ -399,11 +397,11 @@ useEffect(() => { load() }, [])
             value={search} onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, minWidth: 180 }}
           />
-          <Select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ width: 200 }}>
+          <Select value={filterTypeId} onChange={e => { setFilterTypeId(e.target.value); setPage(1) }} style={{ width: 200 }}>
             <option value="">Tất cả loại file</option>
-            {typeNames.map(t => <option key={t} value={t}>{t}</option>)}
+            {dbTypes.map(t => <option key={t.id} value={t.id}>{t.upload_name}</option>)}
           </Select>
-          <Select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ width: 150 }}>
+          <Select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(1) }} style={{ width: 150 }}>
             <option value="">Tất cả trạng thái</option>
             <option value="ok">Hợp lệ</option>
             <option value="error">Lỗi</option>
@@ -424,13 +422,13 @@ useEffect(() => { load() }, [])
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ padding: '32px 0', textAlign: 'center', color: C.textLight, fontSize: 13 }}>
-                    Chưa có file nào được tải lên
+                    {search || filterTypeId || filterStatus ? 'Không tìm thấy bản ghi phù hợp' : 'Chưa có file nào được tải lên'}
                   </td>
                 </tr>
-              ) : filtered.map((r, i) => {
+              ) : rows.map((r, i) => {
                 const typeColor = typeColorMap[r.upload_type_id] ?? C.primary
                 return (
                   <tr key={r.id} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff' }}>
@@ -468,9 +466,16 @@ useEffect(() => { load() }, [])
             </tbody>
           </table>
         )}
-        <div style={{ padding: '12px 16px', color: C.textMuted, fontSize: 12, borderTop: `1px solid ${C.cardBorder}` }}>
-          Hiển thị <b>{filtered.length}</b> / {rows.length} bản ghi (từ DB)
-        </div>
+        {!loading && (
+          <Pagination
+            total={totals.total}
+            page={page}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={setPageSize}
+            itemLabel="bản ghi"
+          />
+        )}
       </Card>
     </div>
   )

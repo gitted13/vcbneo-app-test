@@ -112,10 +112,20 @@ export const api = {
       const params = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : ''
       return request(`/flex/types${params}`)
     },
-    getRows: (typeId) => request(`/flex/rows?type_id=${typeId}`),
-    getFiles: (typeId) => {
-      const params = typeId != null ? `?type_id=${typeId}` : ''
-      return request(`/flex/files${params}`)
+    getRows: (typeId, { page = 1, pageSize = 50, search = '', dateField = '', dateFrom = '', dateTo = '' } = {}) => {
+      const params = new URLSearchParams({ type_id: typeId, page, page_size: pageSize })
+      if (search)    params.set('search', search)
+      if (dateField) params.set('date_field', dateField)
+      if (dateFrom)  params.set('date_from', dateFrom)
+      if (dateTo)    params.set('date_to', dateTo)
+      return request(`/flex/rows?${params}`)
+    },
+    getFiles: (typeId, { page = 1, pageSize = 20, search = '', status = '' } = {}) => {
+      const params = new URLSearchParams({ page, page_size: pageSize })
+      if (typeId != null) params.set('type_id', typeId)
+      if (search) params.set('search', search)
+      if (status) params.set('status', status)
+      return request(`/flex/files?${params}`)
     },
     upload: (typeId, file) => {
       const fd = new FormData()

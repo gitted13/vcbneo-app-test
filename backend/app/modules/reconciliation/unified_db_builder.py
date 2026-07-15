@@ -349,5 +349,29 @@ def _build_from_db() -> list[dict]:
     return rows
 
 
+# In-memory cache: _build_from_db() does a full in-memory join across 6 file
+# types (Swift Đi/Đến, Core, NAPAS Đi/Đến/KTC) plus match-index construction —
+# this is the actual "load time" cost for CoreSummary/NapasCore/SwiftCore/
+# MasterSummary (all 4 call this endpoint), not the payload size. Their KPI
+# filters are JS closures (data/reconcile.js filterFn) evaluated over
+# recon_status/resolution fields — not portable to a server-side query filter
+# without duplicating that classification logic, so pagination here (unlike
+# /flex/rows) would only shrink the response, not the rebuild cost that
+# dominates. Caching the built result and invalidating on any data change
+# (upload/purge/delete/schema/join-config edit — same call sites already
+# calling mark_stale_by_type/mark_stale_by_config/mark_stale_all/
+# clear_type_id_cache, see flex/router.py and reconciliation/router.py) fixes
+# the actual bottleneck instead.
+_db_rows_cache: list[dict] | None = None
+
+
 def get_db_rows() -> list[dict]:
-    return _build_from_db()
+    global _db_rows_cache
+    if _db_rows_cache is None:
+        _db_rows_cache = _build_from_db()
+    return _db_rows_cache
+
+
+def clear_db_rows_cache() -> None:
+    global _db_rows_cache
+    _db_rows_cache = None

@@ -1,13 +1,13 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import PageShell from '../../components/PageShell'
 import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
+import Pagination from '../../components/Pagination'
 import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
 
 const PALETTE = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#64748b', '#0891b2', '#be185d']
-const PAGE_SIZE = 200
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -123,12 +123,16 @@ export default function DataStorage() {
   const [types, setTypes]           = useState([])
   const [loading, setLoading]       = useState(true)
   const [activeId, setActiveId]     = useState(null)
-  const [rows, setRows]             = useState([])
+  const [rows, setRows]             = useState([])       // current page only — server-side paginated
+  const [rowsTotal, setRowsTotal]   = useState(0)         // matches current search/date filter
+  const [rawTotal, setRawTotal]     = useState(0)         // unfiltered total for this type
   const [rowsLoading, setRLoading]  = useState(false)
-  const [search, setSearch]         = useState('')
+  const [search, setSearch]         = useState('')         // controlled input value (instant)
+  const [debouncedSearch, setDSearch] = useState('')        // what's actually sent to the server
   const [dateFrom, setDateFrom]     = useState('')
   const [dateTo, setDateTo]         = useState('')
   const [page, setPage]             = useState(1)
+  const [pageSize, setPageSize]     = useState(50)
 
   useEffect(() => {
     api.flex.getTypes('reconcile')
@@ -140,18 +144,19 @@ export default function DataStorage() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Debounce search: only hit the server 350ms after the user stops typing,
+  // so the "instant filter" feel is kept without a request per keystroke.
   useEffect(() => {
-    if (!activeId) return
-    setRLoading(true)
-    setRows([])
+    const t = setTimeout(() => { setDSearch(search); setPage(1) }, 350)
+    return () => clearTimeout(t)
+  }, [search])
+
+  useEffect(() => {
     setSearch('')
+    setDSearch('')
     setDateFrom('')
     setDateTo('')
     setPage(1)
-    api.flex.getRows(activeId)
-      .then(setRows)
-      .catch(() => setRows([]))
-      .finally(() => setRLoading(false))
   }, [activeId])
 
   const activeType  = types.find(t => t.id === activeId)
@@ -163,37 +168,22 @@ export default function DataStorage() {
   // are schema'd "date" but actually hold a time value, e.g. pctime).
   const dateCol = allCols.find(c => isDateType(c) && !isTimeField(c))
 
-  // Parse heterogeneous date formats to ISO yyyy-mm-dd for range comparison.
-  // Shares parseFlexDate with the display formatter so filtering and what's
-  // shown on screen always agree on what date a raw value represents.
-  function toISO(val) {
-    const p = parseFlexDate(val)
-    if (!p) return null
-    return `${p.y}-${String(p.mo).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`
-  }
-
-  const filtered = useMemo(() => {
-    let result = rows
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(row =>
-        Object.values(row).some(v => String(v ?? '').toLowerCase().includes(q))
-      )
-    }
-    if (dateCol && (dateFrom || dateTo)) {
-      result = result.filter(row => {
-        const iso = toISO(row[dateCol.field_name])
-        if (!iso) return true
-        if (dateFrom && iso < dateFrom) return false
-        if (dateTo   && iso > dateTo)   return false
-        return true
-      })
-    }
-    return result
-  }, [rows, search, dateFrom, dateTo, dateCol])
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
-  const pageRows   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  // Server does the actual search/date filtering + pagination now — the
+  // table only ever holds one page's worth of rows in memory/DOM, no matter
+  // how large the underlying file type's dataset grows.
+  useEffect(() => {
+    if (!activeId) return
+    setRLoading(true)
+    api.flex.getRows(activeId, {
+      page, pageSize,
+      search: debouncedSearch,
+      dateField: dateCol?.field_name || '',
+      dateFrom, dateTo,
+    })
+      .then(res => { setRows(res.rows); setRowsTotal(res.total); setRawTotal(res.raw_total) })
+      .catch(() => { setRows([]); setRowsTotal(0); setRawTotal(0) })
+      .finally(() => setRLoading(false))
+  }, [activeId, page, pageSize, debouncedSearch, dateFrom, dateTo, dateCol?.field_name])
 
   if (loading) {
     return (
@@ -255,7 +245,7 @@ export default function DataStorage() {
                 {schema.description && <span style={{ fontSize: 12, color: C.textMuted }}>— {schema.description}</span>}
               </div>
               <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>
-                {rowsLoading ? 'Đang tải...' : `${rows.length.toLocaleString()} bản ghi · ${displayCols.length} cột`}
+                {rowsLoading ? 'Đang tải...' : `${rawTotal.toLocaleString()} bản ghi · ${displayCols.length} cột`}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -268,11 +258,11 @@ export default function DataStorage() {
             <Input
               placeholder="Tìm kiếm trong tất cả cột..."
               value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1) }}
+              onChange={e => setSearch(e.target.value)}
               style={{ flex: 1, minWidth: 160 }}
             />
             {search && (
-              <button onClick={() => { setSearch(''); setPage(1) }}
+              <button onClick={() => { setSearch(''); setDSearch(''); setPage(1) }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, fontSize: 13 }}>✕</button>
             )}
             {dateCol && (
@@ -303,7 +293,7 @@ export default function DataStorage() {
               </>
             )}
             <span style={{ fontSize: 12, color: C.textMuted, whiteSpace: 'nowrap' }}>
-              {filtered.length !== rows.length ? `${filtered.length} / ${rows.length}` : rows.length.toLocaleString()} dòng
+              {rowsTotal !== rawTotal ? `${rowsTotal.toLocaleString()} / ${rawTotal.toLocaleString()}` : rowsTotal.toLocaleString()} dòng
             </span>
           </div>
 
@@ -326,16 +316,16 @@ export default function DataStorage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.length === 0 ? (
+                  {rows.length === 0 ? (
                     <tr>
                       <td colSpan={displayCols.length + 1} style={{ padding: 32, textAlign: 'center', color: C.textMuted }}>
                         {search ? 'Không tìm thấy bản ghi phù hợp' : 'Chưa có dữ liệu — hãy upload file trước'}
                       </td>
                     </tr>
-                  ) : pageRows.map((row, i) => (
+                  ) : rows.map((row, i) => (
                     <tr key={row._id ?? i} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff' }}>
                       <td style={{ padding: '7px 12px', color: C.textLight, fontSize: 11, whiteSpace: 'nowrap' }}>
-                        {(page - 1) * PAGE_SIZE + i + 1}
+                        {(page - 1) * pageSize + i + 1}
                       </td>
                       {displayCols.map(col => (
                         <td key={col.field_name} style={{ padding: '7px 14px', whiteSpace: 'nowrap' }}>
@@ -350,23 +340,15 @@ export default function DataStorage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.cardBorder}`, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                style={pageBtnStyle(page === 1)}>← Trước</button>
-              <span style={{ fontSize: 12, color: C.textMuted }}>
-                Trang <b>{page}</b> / {totalPages} ({filtered.length.toLocaleString()} dòng)
-              </span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                style={pageBtnStyle(page === totalPages)}>Sau →</button>
-            </div>
-          )}
-
-          {/* Footer */}
           {!rowsLoading && (
-            <div style={{ padding: '8px 16px', fontSize: 11, color: C.textLight, borderTop: `1px solid ${C.cardBorder}` }}>
-              Hiển thị {pageRows.length} / {filtered.length} dòng · mỗi trang {PAGE_SIZE} · type_id={activeId}
-            </div>
+            <Pagination
+              total={rowsTotal}
+              page={page}
+              pageSize={pageSize}
+              onPage={setPage}
+              onPageSize={setPageSize}
+              itemLabel="dòng"
+            />
           )}
         </div>
       )}
@@ -383,14 +365,6 @@ const TH = {
   textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'nowrap',
 }
 
-function pageBtnStyle(disabled) {
-  return {
-    padding: '4px 12px', fontSize: 12, border: `1px solid ${C.cardBorder}`,
-    borderRadius: 4, background: disabled ? C.neutralBg : '#fff',
-    color: disabled ? C.textLight : C.text, cursor: disabled ? 'default' : 'pointer',
-    fontFamily: 'inherit',
-  }
-}
 
 function ColPillList({ cols }) {
   const fileCols  = cols.filter(c => !c.fixed_value)

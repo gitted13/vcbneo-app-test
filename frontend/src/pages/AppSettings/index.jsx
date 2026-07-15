@@ -7,6 +7,7 @@ import Button from '../../components/Button'
 import Modal from '../../components/Modal'
 import EmptyState from '../../components/EmptyState'
 import { Input, Select, FormRow } from '../../components/Input'
+import Pagination from '../../components/Pagination'
 import { C, radius, shadow } from '../../theme'
 import { RECON_STATUS_META, RESOLUTION_OF } from '../../data/reconcile'
 
@@ -94,6 +95,8 @@ function RolesTab() {
   const [users, setUsers] = useState(INIT_USERS)
   const [userModal, setUserModal] = useState(false)
   const [editUser, setEditUser]   = useState(null)
+  const [page, setPage]           = useState(1)
+  const [pageSize, setPageSize]   = useState(10)
 
   const roleBadge = (role) => {
     const map = { Admin: 'error', Operator: 'primary', Viewer: 'neutral' }
@@ -104,6 +107,7 @@ function RolesTab() {
   const toggleActive = (uid)      => setUsers(p => p.map(u => u.id === uid ? { ...u, active: !u.active } : u))
 
   const active = users.filter(u => u.active).length
+  const pageRows = users.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div>
@@ -138,7 +142,7 @@ function RolesTab() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u, i) => (
+              {pageRows.map((u, i) => (
                 <tr key={u.id} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff', opacity: u.active ? 1 : 0.55 }}>
                   <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', textAlign: 'left' }}>
                     <div style={{ fontWeight: 600, color: C.text }}>{u.name}</div>
@@ -166,6 +170,14 @@ function RolesTab() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          total={users.length}
+          page={page}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={setPageSize}
+          itemLabel="người dùng"
+        />
       </Card>
 
       <UserFormModal
