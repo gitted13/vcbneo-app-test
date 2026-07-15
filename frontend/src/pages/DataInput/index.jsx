@@ -346,6 +346,7 @@ useEffect(() => { load() }, [])
     message: 'Thao tác này xóa vĩnh viễn toàn bộ dữ liệu đã tải (mọi loại file) và toàn bộ kết quả đối soát đã chạy. Không thể hoàn tác.',
     variant: 'danger',
     confirmLabel: 'Xóa tất cả',
+    requireTypedText: 'XÓA',
     onConfirm: () => {
       api.flex.purge()
         .then(() => { load(); onReloadTypes?.(); toast('Đã xóa toàn bộ dữ liệu đã tải lên.', 'success') })

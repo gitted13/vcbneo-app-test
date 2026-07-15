@@ -1,12 +1,22 @@
+import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { C, radius, shadow } from '../theme'
 import Button from './Button'
+import { Input } from './Input'
 
 export default function ConfirmDialog() {
   const { confirm, closeConfirm } = useApp()
+  const [typedText, setTypedText] = useState('')
+
+  useEffect(() => { setTypedText('') }, [confirm])
+
   if (!confirm) return null
 
+  const requireTypedText = confirm.requireTypedText
+  const locked = requireTypedText && typedText.trim() !== requireTypedText
+
   const handleConfirm = () => {
+    if (locked) return
     confirm.onConfirm?.()
     closeConfirm()
   }
@@ -35,8 +45,21 @@ export default function ConfirmDialog() {
           {confirm.title}
         </div>
         {confirm.message && (
-          <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 24, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 13, color: C.textMuted, marginBottom: requireTypedText ? 14 : 24, lineHeight: 1.6 }}>
             {confirm.message}
+          </div>
+        )}
+        {requireTypedText && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 6 }}>
+              Nhập <b style={{ color: C.error }}>{requireTypedText}</b> để xác nhận:
+            </div>
+            <Input
+              autoFocus
+              value={typedText}
+              onChange={e => setTypedText(e.target.value)}
+              placeholder={requireTypedText}
+            />
           </div>
         )}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -44,6 +67,7 @@ export default function ConfirmDialog() {
           <Button
             variant={confirm.variant === 'danger' ? 'danger' : 'primary'}
             onClick={handleConfirm}
+            disabled={locked}
           >
             {confirm.confirmLabel ?? 'Xác nhận'}
           </Button>
