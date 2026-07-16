@@ -105,24 +105,24 @@ def resolve_type_ids(source: str, direction: str | None) -> list[int]:
 
 
 def _resolve_and_load(source: str, direction: str) -> tuple[int | None, list[dict]]:
-    """Resolve (source, direction) to its rows. Core unions all source="Core"
-    types and filters by row content (see resolve_type_ids docstring);
-    everything else is exactly one type. Returns (representative_type_id,
-    rows) — type_id is None (and rows []) if nothing is configured yet."""
-    if source == "Core":
-        type_ids = resolve_type_ids("Core", None)
-        if not type_ids:
-            return None, []
-        row_filter = _CORE_ROW_FILTER.get(direction)
-        rows: list[dict] = []
-        for tid in type_ids:
-            rows.extend(_load_rows(tid, row_filter))
-        return type_ids[0], rows
-
-    type_ids = resolve_type_ids(source, direction)
+    """Resolve (source, direction) to its rows, unioning every type tagged
+    with that source(+direction) — not just Core. This also covers e.g.
+    napas_di + napas_di_ktc both tagged source=NAPAS/direction=Đi: without
+    unioning here, only the first-resolved type's rows would ever be loaded
+    and the other type's rows would silently vanish from every reconcile
+    run touching that source, no error, just fewer/wrong results. Core is
+    the only source that also filters by row content (see resolve_type_ids
+    docstring) since its Đi/Đến split is per-row, not per-type. Returns
+    (representative_type_id, rows) — type_id is None (and rows []) if
+    nothing is configured yet."""
+    type_ids = resolve_type_ids("Core", None) if source == "Core" else resolve_type_ids(source, direction)
     if not type_ids:
         return None, []
-    return type_ids[0], _load_rows(type_ids[0])
+    row_filter = _CORE_ROW_FILTER.get(direction) if source == "Core" else None
+    rows: list[dict] = []
+    for tid in type_ids:
+        rows.extend(_load_rows(tid, row_filter))
+    return type_ids[0], rows
 
 
 def _load_rows(
@@ -438,14 +438,29 @@ def _canonicalize_groups(groups: list[list[dict]]) -> tuple[list[list[dict]], bo
     return out_groups, changed
 
 
+# A very early legacy version of the NAPAS_DI seed shipped "Không thành
+# công (KTC)" with NO condition at all (comment: "KTC: from napas_di_ktc
+# type (unmatched)" — the intent was never actually implemented). A rule
+# with empty groups can never match (_classify() skips it outright), so
+# this wasn't a soft default, it was permanently inert. Auto-repair to the
+# condition backend/app/db/seed.py's current _STATUS_RULES already documents
+# as correct — safe because an empty rule was never a valid user choice, so
+# there's nothing a user's own customization could lose here.
+_KNOWN_BROKEN_RULE_FIXES: dict[tuple[str, str], list[list[dict]]] = {
+    ("NAPAS_DI", "napas_di_2"): [[{"f": "TC/KTC", "op": "=", "v": "KTC"}]],
+}
+
+
 def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
     """Upgrade any old-format (bare chip-list) cond_key entries to the new
-    self-describing rule-object format, and canonicalize every chip's f/v to
-    the accented spelling the edit UI expects. Returns (possibly-new dict,
-    changed?). Safe/idempotent: cond_keys already in the new format with
-    already-canonical chips pass through untouched; existing conditions are
-    otherwise preserved exactly (wrapped as a single OR-group for structural
-    migration), only spelling and the label/color/id wrapper are added."""
+    self-describing rule-object format, canonicalize every chip's f/v to the
+    accented spelling the edit UI expects, and repair known-broken legacy
+    rules that can never match (see _KNOWN_BROKEN_RULE_FIXES). Returns
+    (possibly-new dict, changed?). Safe/idempotent: cond_keys already in the
+    new format with already-canonical, non-broken chips pass through
+    untouched; existing conditions are otherwise preserved exactly (wrapped
+    as a single OR-group for structural migration), only spelling and the
+    label/color/id wrapper are added."""
     changed = False
     out: dict = {}
     for cond_key, entries in (rules or {}).items():
@@ -455,9 +470,15 @@ def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
         if isinstance(entries[0], dict) and "groups" in entries[0]:
             rules_out = []
             for rule in entries:
-                groups, g_changed = _canonicalize_groups(rule.get("groups") or [])
+                groups = rule.get("groups") or []
+                fix = _KNOWN_BROKEN_RULE_FIXES.get((cond_key, rule.get("id")))
+                if fix is not None and not groups:
+                    groups = fix
+                    changed = True
+                groups, g_changed = _canonicalize_groups(groups)
                 if g_changed:
                     changed = True
+                if groups != (rule.get("groups") or []):
                     rule = {**rule, "groups": groups}
                 rules_out.append(rule)
             out[cond_key] = rules_out

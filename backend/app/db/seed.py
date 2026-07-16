@@ -1,5 +1,6 @@
 import json
 from app.db.connection import db_cursor
+from app.modules.reconciliation.unified_db_builder import clear_db_rows_cache
 
 # ── Reconcile join configs ────────────────────────────────────────────────────
 # matchFields dùng tên field thực tế trong uploadedFileRows
@@ -253,6 +254,11 @@ TYPES = [
                 {"col_name": "Phí chia sẻ rút tiền", "field_name": "phí_chia_sẻ_rút_tiền",  "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "Phí chia sẻ quẹt POS", "field_name": "phí_chia_sẻ_quẹt_pos", "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"field_name": "direction", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "đi"},
+                # Lets DateRules' "TC/KTC" condition (aliased to phản_hồi in
+                # engine_flex.py) tell real transactions apart from the
+                # separate napas_di_ktc upload once both are unioned into the
+                # same NAPAS_DI reconcile dataset — see napas_di_ktc below.
+                {"field_name": "phản_hồi", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "TC"},
             ],
         },
     },
@@ -280,7 +286,7 @@ TYPES = [
     {
         "upload_name": "Napas đi không thành công",
         "fields_schema": {
-            "type_code": "napas_di_ktc", "description": "",
+            "type_code": "napas_di_ktc", "description": "", "source": "NAPAS", "direction": "Đi",
             "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Mã GD",          "field_name": "mã_gd",          "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
@@ -290,6 +296,12 @@ TYPES = [
                 {"col_name": "Giờ GD",         "field_name": "giờ_gd",         "data_type": "integer", "required": True,  "allowed_values": [], "note": ""},
                 {"col_name": "Ngày GD",        "field_name": "ngày_gd",        "data_type": "date",    "required": True,  "allowed_values": [], "note": ""},
                 {"field_name": "direction", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "đi"},
+                # Tagged source=NAPAS/direction=Đi (same as napas_di) so both
+                # union into the same NAPAS_DI reconcile dataset — this fixed
+                # phản_hồi="KTC" is what lets the seeded "Không thành công
+                # (KTC)" DateRules rule (TC/KTC = KTC) actually match these
+                # rows instead of never firing (see napas_di's phản_hồi="TC").
+                {"field_name": "phản_hồi", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "KTC"},
             ],
         },
     },
@@ -507,10 +519,14 @@ def seed_flex():
 # wrong here would silently point reconciliation at the wrong data. The user
 # must assign Core's source in FileTypeSettings themselves.
 _UNAMBIGUOUS_SOURCE_DIRECTION = {
-    "swift_di":  ("Swift", "Đi"),
-    "swift_den": ("Swift", "Đến"),
-    "napas_di":  ("NAPAS", "Đi"),
-    "napas_den": ("NAPAS", "Đến"),
+    "swift_di":     ("Swift", "Đi"),
+    "swift_den":    ("Swift", "Đến"),
+    "napas_di":     ("NAPAS", "Đi"),
+    "napas_den":    ("NAPAS", "Đến"),
+    # napas_di_ktc is a single well-known type_code (unlike Core, there's no
+    # ambiguity about which upload it is) — safe to auto-tag so it unions
+    # into the same NAPAS_DI reconcile dataset as napas_di.
+    "napas_di_ktc": ("NAPAS", "Đi"),
 }
 
 
@@ -541,6 +557,89 @@ def migrate_type_source_direction():
         print(f"[migrate_type_source_direction] OK ({updated} type(s) tagged)")
     except Exception as exc:
         print(f"[migrate_type_source_direction] error: {exc}")
+
+
+# napas_di_ktc (failed NAPAS transactions) and napas_di (real transactions)
+# now union into the same NAPAS_DI reconcile dataset via source/direction
+# tagging above — but DateRules' "Không thành công (KTC)" rule (TC/KTC=KTC)
+# can only tell them apart if each row carries a phản_hồi value. Existing
+# deployments predate this and won't have the column yet.
+_NAPAS_KTC_MARKER = {
+    "napas_di":     "TC",
+    "napas_di_ktc": "KTC",
+}
+
+
+def migrate_napas_ktc_marker():
+    """One-time, idempotent backfill: add a fixed_value phản_hồi column to
+    napas_di/napas_di_ktc if missing, so the KTC/TC DateRules condition has
+    something to match against. Never overwrites a phản_hồi column a user
+    already configured themselves.
+
+    fixed_value columns are baked into each row's file_data JSON at UPLOAD
+    time, not read dynamically from the current schema — so adding the
+    column here only affects files uploaded AFTER this migration runs.
+    Already-uploaded rows are backfilled below so existing data doesn't need
+    a manual re-upload to become classifiable."""
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id, fields_schema FROM uploadedTypes WHERE is_active = 1")
+            type_rows = cur.fetchall()
+            updated_types = 0
+            marked_type_ids: list[tuple[int, str]] = []  # (type_id, marker) to backfill rows for
+            for type_id, schema_raw in type_rows:
+                try:
+                    schema = json.loads(schema_raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                marker = _NAPAS_KTC_MARKER.get(schema.get("type_code"))
+                if not marker:
+                    continue
+                columns = schema.get("columns") or []
+                existing = next((c for c in columns if c.get("field_name") == "phản_hồi"), None)
+                if existing is None:
+                    columns.append({
+                        "field_name": "phản_hồi", "data_type": "string", "required": False,
+                        "allowed_values": [], "note": "", "fixed_value": marker,
+                    })
+                    schema["columns"] = columns
+                    cur.execute(
+                        "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
+                        json.dumps(schema, ensure_ascii=False), type_id,
+                    )
+                    updated_types += 1
+                    marked_type_ids.append((type_id, marker))
+                elif existing.get("fixed_value") == marker:
+                    marked_type_ids.append((type_id, marker))  # already tagged — still needs row backfill
+
+            updated_rows = 0
+            for type_id, marker in marked_type_ids:
+                cur.execute(
+                    """
+                    SELECT r.id, r.file_data FROM uploadedFileRows r
+                    JOIN uploadedFiles f ON f.id = r.upload_file_id
+                    WHERE f.upload_type_id = ?
+                    """,
+                    type_id,
+                )
+                for row_id, data_raw in cur.fetchall():
+                    try:
+                        data = json.loads(data_raw or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if data.get("phản_hồi") == marker:
+                        continue
+                    data["phản_hồi"] = marker
+                    cur.execute(
+                        "UPDATE uploadedFileRows SET file_data = ? WHERE id = ?",
+                        json.dumps(data, ensure_ascii=False), row_id,
+                    )
+                    updated_rows += 1
+        print(f"[migrate_napas_ktc_marker] OK ({updated_types} type(s), {updated_rows} row(s) backfilled)")
+        if updated_types or updated_rows:
+            clear_db_rows_cache()
+    except Exception as exc:
+        print(f"[migrate_napas_ktc_marker] error: {exc}")
 
 
 def seed_reconcile_configs():
