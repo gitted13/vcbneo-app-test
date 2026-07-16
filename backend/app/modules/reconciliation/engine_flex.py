@@ -384,13 +384,68 @@ _LEGACY_RULE_META: dict[str, list[tuple[str, str]]] = {
 
 _PALETTE = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2", "#64748b"]
 
+# Legacy seed data (backend/app/db/seed.py before the diacritics fix, and the
+# still-orphaned backend/seed_status_rules.py) stores field/status codes as
+# plain ASCII ("Ngay GD", "thanh cong"). _eval_chip() already matches these
+# fine at evaluation time via _norm() — but the DateRules edit modal's
+# <select> needs an EXACT string match against its option values (which are
+# all accented — see frontend/src/data/dateRulesVocab.js). An un-canonicalized
+# chip therefore renders as if the FIRST option in the dropdown were selected
+# (misleading — e.g. an "Ngay GD" field chip silently displays as "Trạng thái
+# phản hồi Swift"), and risks being silently corrupted if a confused user
+# "fixes" what looks like the wrong selection.
+_FIELD_CANON_BY_NORM: dict[str, str] = {_norm(k): k for k in _FIELD_ALIASES}
+_PRESENCE_FIELDS_NORM = {_norm(x) for x in ("Swift", "NAPAS", "Core", "Swift & NAPAS")}
+_STATUS_VALUE_CANON: dict[str, dict[str, str]] = {
+    # Keep in sync with frontend/src/data/dateRulesVocab.js's STATUS_VALUE_OPTIONS.
+    "TT Swift": {_norm(v): v for v in ("Thành công", "Timeout", "Thất bại")},
+    "TC/KTC":   {_norm(v): v for v in ("TC", "KTC")},
+}
+
+
+def _canonicalize_chip(chip: dict) -> dict:
+    """Rewrite a chip's f/v to the exact accented spelling the DateRules
+    edit modal's dropdowns expect. No-op (returns the same dict) if already
+    canonical or if a code doesn't match any known field/value (left as-is
+    rather than guessed, so nothing is silently blanked)."""
+    f = chip.get("f", "")
+    v = chip.get("v", "")
+    canon_f = _FIELD_CANON_BY_NORM.get(_norm(f), f)
+
+    if v == "null" or _norm(canon_f) in _PRESENCE_FIELDS_NORM:
+        canon_v = v
+    elif _norm(canon_f) in _DATE_FIELDS_NORM:
+        canon_v = _FIELD_CANON_BY_NORM.get(_norm(v), v)
+    else:
+        canon_v = _STATUS_VALUE_CANON.get(canon_f, {}).get(_norm(v), v)
+
+    if canon_f == f and canon_v == v:
+        return chip
+    return {**chip, "f": canon_f, "v": canon_v}
+
+
+def _canonicalize_groups(groups: list[list[dict]]) -> tuple[list[list[dict]], bool]:
+    changed = False
+    out_groups = []
+    for group in groups:
+        out_group = []
+        for chip in group:
+            canon = _canonicalize_chip(chip)
+            if canon is not chip:
+                changed = True
+            out_group.append(canon)
+        out_groups.append(out_group)
+    return out_groups, changed
+
 
 def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
     """Upgrade any old-format (bare chip-list) cond_key entries to the new
-    self-describing rule-object format. Returns (possibly-new dict, changed?).
-    Safe/idempotent: cond_keys already in the new format pass through
-    untouched; existing conditions are preserved exactly (wrapped as a
-    single OR-group), only the label/color/id wrapper is added."""
+    self-describing rule-object format, and canonicalize every chip's f/v to
+    the accented spelling the edit UI expects. Returns (possibly-new dict,
+    changed?). Safe/idempotent: cond_keys already in the new format with
+    already-canonical chips pass through untouched; existing conditions are
+    otherwise preserved exactly (wrapped as a single OR-group for structural
+    migration), only spelling and the label/color/id wrapper are added."""
     changed = False
     out: dict = {}
     for cond_key, entries in (rules or {}).items():
@@ -398,7 +453,14 @@ def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
             out[cond_key] = entries
             continue
         if isinstance(entries[0], dict) and "groups" in entries[0]:
-            out[cond_key] = entries  # already new format
+            rules_out = []
+            for rule in entries:
+                groups, g_changed = _canonicalize_groups(rule.get("groups") or [])
+                if g_changed:
+                    changed = True
+                    rule = {**rule, "groups": groups}
+                rules_out.append(rule)
+            out[cond_key] = rules_out
             continue
         # Old format: entries is a list of chip-lists
         changed = True
@@ -406,11 +468,12 @@ def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
         migrated = []
         for i, chips in enumerate(entries):
             label, color = meta[i] if i < len(meta) else (f"Trạng thái {i + 1}", _PALETTE[i % len(_PALETTE)])
+            groups, _ = _canonicalize_groups([chips] if chips else [])
             migrated.append({
                 "id": f"{cond_key.lower()}_{i}",
                 "label": label,
                 "color": color,
-                "groups": [chips] if chips else [],
+                "groups": groups,
             })
         out[cond_key] = migrated
     return out, changed
