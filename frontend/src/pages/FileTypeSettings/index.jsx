@@ -24,6 +24,20 @@ const TRANSFORM_TYPES = [
   { value: 'concat',         label: 'Ghép chuỗi' },
 ]
 const TRANSFORM_LABELS = { math: 'Toán', regex_extract: 'Regex', if_else: 'Điều kiện', concat: 'Ghép chuỗi' }
+
+// Multiple columns can all read from the same source col_name (e.g. teller/
+// sequence/trace all extracted from one "DIỄN GIẢI" text cell via different
+// regex patterns) — without this, the "Cột trong file" summary shows the
+// identical source name for every one of them with no way to tell which
+// pattern produces which field.
+function describeTransform(t) {
+  if (!t?.type) return ''
+  if (t.type === 'regex_extract') return `nhóm ${t.group ?? 0}: ${t.pattern || '(chưa có pattern)'}`
+  if (t.type === 'math')          return `${MATH_OPS.find(o => o.value === t.op)?.label || t.op} ${t.value ?? ''}`
+  if (t.type === 'if_else')       return `nếu ${IF_OPS.find(o => o.value === t.op)?.label || t.op} "${t.cond_value ?? ''}" → "${t.then_value ?? ''}" : "${t.else_value ?? ''}"`
+  if (t.type === 'concat')        return `ghép ${t.parts?.length || 0} phần`
+  return ''
+}
 const IF_OPS = [
   { value: 'contains',     label: 'chứa' },
   { value: 'equals',       label: 'bằng đúng' },
@@ -425,8 +439,13 @@ function ColRow({ col, onEdit, onRemove }) {
           <div>
             <span style={{ fontSize: 12, color: C.textMuted, fontFamily: 'monospace' }}>{col.col_name || <i style={{ color: C.textLight }}>—</i>}</span>
             {col.transform?.type && (
-              <div style={{ fontSize: 10, color: '#7c3aed', marginTop: 2 }}>
+              <div
+                style={{ fontSize: 10, color: '#7c3aed', marginTop: 2, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={describeTransform(col.transform)}
+              >
                 ƒ {TRANSFORM_LABELS[col.transform.type] || col.transform.type}
+                {': '}
+                <span style={{ fontFamily: 'monospace' }}>{describeTransform(col.transform)}</span>
               </div>
             )}
           </div>

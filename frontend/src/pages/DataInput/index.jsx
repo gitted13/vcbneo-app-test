@@ -214,7 +214,7 @@ function UploadSlot({ ft, fileInfo, result, uploading, isAdmin, onDrop, onUpload
               <div style={{ marginTop: 3 }}>
                 <span style={{ color: C.error, fontWeight: 700 }}>* </span>
                 <span style={{ color: C.textMuted }}>Bắt buộc: </span>
-                <span style={{ color: C.text, fontWeight: 500 }}>{required.map(c => c.col_name).join(', ')}</span>
+                <span style={{ color: C.text, fontWeight: 500 }}>{required.map(c => c.field_name).join(', ')}</span>
               </div>
             )}
             {withAllowedValues.length > 0 && (
@@ -222,7 +222,7 @@ function UploadSlot({ ft, fileInfo, result, uploading, isAdmin, onDrop, onUpload
                 <span style={{ color: C.textMuted }}>Giá trị hợp lệ: </span>
                 {withAllowedValues.map(c => (
                   <span key={c.field_name} style={{ color: C.text }}>
-                    {c.col_name} (<span style={{ fontFamily: 'monospace' }}>{c.allowed_values.join(', ')}</span>){c !== withAllowedValues[withAllowedValues.length - 1] ? '; ' : ''}
+                    {c.field_name} (<span style={{ fontFamily: 'monospace' }}>{c.allowed_values.join(', ')}</span>){c !== withAllowedValues[withAllowedValues.length - 1] ? '; ' : ''}
                   </span>
                 ))}
               </div>

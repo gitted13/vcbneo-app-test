@@ -380,13 +380,19 @@ function LogicFormModal({ open, editing, types, onClose, onSave }) {
       </div>
 
       <FormRow label="Trường so khớp (trái = phải)" hint="Các cặp trường dùng để ghép giữa 2 nguồn — chọn từ cột thực tế đã cấu hình ở Cấu hình loại file">
-        {noSchema && (
-          <div style={{ marginBottom: 8, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, fontSize: 12, color: '#92400e' }}>
-            ⚠ Không tìm thấy loại file nào gán <b>Nguồn dữ liệu = {form.leftSource || form.rightSource}</b>
-            {form.direction !== 'Cả hai' && <> và <b>Chiều giao dịch = {form.direction}</b></>} trong <b>Cấu hình loại file</b>.
-            {form.direction === 'Cả hai' ? ' Swift/NAPAS không hỗ trợ "Cả hai" (2 chiều là 2 schema cột khác nhau).' : ' Vào Cấu hình loại file để gán, hoặc nhập tên trường thủ công bên dưới — kiểm tra kỹ chính tả khớp với field_name, nếu không rule sẽ không chạy được.'}
-          </div>
-        )}
+        {noSchema && (() => {
+          const missingSides = [
+            !leftFields  && `${form.leftSource} (Nguồn trái)`,
+            !rightFields && `${form.rightSource} (Nguồn phải)`,
+          ].filter(Boolean)
+          return (
+            <div style={{ marginBottom: 8, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, fontSize: 12, color: '#92400e' }}>
+              ⚠ Không tìm thấy loại file nào gán <b>Nguồn dữ liệu = {missingSides.join(', ')}</b>
+              {form.direction !== 'Cả hai' && <> với <b>Chiều giao dịch = {form.direction}</b></>} trong <b>Cấu hình loại file</b>.
+              {form.direction === 'Cả hai' ? ' Swift/NAPAS không hỗ trợ "Cả hai" (2 chiều là 2 schema cột khác nhau).' : ' Vào Cấu hình loại file để gán, hoặc nhập tên trường thủ công bên dưới — kiểm tra kỹ chính tả khớp với field_name, nếu không rule sẽ không chạy được.'}
+            </div>
+          )
+        })()}
         {form.matchFields.map((mf, i) => {
           const leftCol  = leftFields?.find(c => c.field_name === mf.left)
           const rightCol = rightFields?.find(c => c.field_name === mf.right)

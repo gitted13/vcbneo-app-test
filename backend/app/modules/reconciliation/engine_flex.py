@@ -483,6 +483,17 @@ def run_flex_reconcile(
             + (f", Chiều={direction}" if left_source != "Core" else "")
             + " — vào Cấu hình loại file để gán."
         )
+    # right_source == "" is a legitimate one-sided config (right_type_id is
+    # None by design in that case) — but if right_source WAS given and still
+    # failed to resolve, this used to silently continue with right_rows=[],
+    # so every left row got 0 matches with no explanation ("nothing matched"
+    # looked like a join/data bug when it was really an untagged type).
+    if right_source and right_type_id is None:
+        raise ValueError(
+            f"Không tìm thấy loại file nào gán Nguồn={right_source}"
+            + (f", Chiều={direction}" if right_source != "Core" else "")
+            + " — vào Cấu hình loại file để gán."
+        )
 
     # 5. Index right side by join key
     right_index: dict[tuple, list] = {}

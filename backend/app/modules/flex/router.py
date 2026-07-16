@@ -373,6 +373,7 @@ async def upload_file(
 
     for row_idx, (_, excel_row) in enumerate(df.iterrows()):
         row_json: dict[str, Any] = {}
+        invalid_fields: list[dict] = []
         for col_def in col_defs:
             field_name = col_def["field_name"]
 
@@ -401,9 +402,18 @@ async def upload_file(
             parsed = _parse_value(raw_val, col_def.get("data_type", "string"))
             av = col_def.get("allowed_values") or []
             if av and not _is_empty_cell(raw_val) and str(raw_val).strip() not in av:
+                # Previously this only logged an error — the row was still
+                # inserted with the disallowed value, so "allowed_values"
+                # was validated but never actually enforced (e.g. a teller
+                # scoped to "5071" could still receive rows for other
+                # tellers). Now it's tracked on the row and rejected below,
+                # same as a missing required field.
+                invalid_fields.append({"field": field_name, "value": str(raw_val).strip(), "allowed": av})
                 errors.append({"row": excel_row_num, "field": field_name,
                                "reason": f"Giá trị '{raw_val}' không hợp lệ. Cho phép: {', '.join(av)}"})
             row_json[field_name] = parsed
+        if invalid_fields:
+            row_json["_invalid_fields"] = invalid_fields
 
         sheet_day = sheet_day_map.get(excel_row.get("__sheet__"))
         if sheet_day:
@@ -420,7 +430,7 @@ async def upload_file(
         if c.get("required") and c.get("fixed_value") is None
     ]
 
-    status = "error" if any(e for e in errors if "bắt buộc" in e["reason"]) else "ok"
+    status = "error" if any(e for e in errors if "bắt buộc" in e["reason"] or "không hợp lệ" in e["reason"]) else "ok"
 
     with db_cursor() as cur:
         cur.execute(
@@ -477,6 +487,15 @@ async def upload_file(
                     rejected_count += 1
                     row_log.append({"row": excel_row_num, "status": "rejected", "reason": f"Thiếu trường bắt buộc: {', '.join(missing)}"})
                     continue
+            invalid_fields = row_json.pop("_invalid_fields", None)
+            if invalid_fields:
+                rejected_count += 1
+                reason = "; ".join(
+                    f"{iv['field']}='{iv['value']}' không hợp lệ (cho phép: {', '.join(iv['allowed'])})"
+                    for iv in invalid_fields
+                )
+                row_log.append({"row": excel_row_num, "status": "rejected", "reason": reason})
+                continue
             if unique_key:
                 k = _row_key(type_id, unique_key, row_json)
                 if k and k in existing_keys:
