@@ -174,3 +174,72 @@ Before touching anything, read `frontend/src/data/reconcile.js` in full — this
 - **The DateRules UI itself has not been visually exercised in a real browser** — everything backend-side (migration, classification, OR/AND semantics, full API round-trip) was verified against real data via direct HTTP calls, and the frontend build-checks clean, but nobody has actually clicked through the new modal in Chrome. Worth a manual pass before/soon after deploying, especially the color-swatch picker and the presence-field Có/Không select, which are the two most "trust the JSX rendered as intended" pieces.
 - **The stray duplicate "Core Banking" row on the deployed server** needs manual deletion via the new 🗑 button (or direct SQL) once this deploys — the seed fix only prevents *future* duplicates.
 - **Minor UX gap**: `RuleModal`'s Save button silently does nothing if the label is empty or a group has zero chips (`canSave` check) — no inline validation message explaining why. Low priority, not fixed in this pass.
+
+---
+
+## 2026-07-16 session — hardcode removal, silent validation bypass, per-row upload detail
+
+### Context
+User shared 3 screenshots (JoinLogic match-field modal, FileTypeSettings' Core Banking Đến columns, DataStorage raw view) and asked to map out problems first, no changes yet. Reported 5 findings; user confirmed all 5 for implementation verbatim: "1, need the split and confirm no more hard code part on project / 2, big issue, fix that / 3, yes / 4, suppress the built in when needed / 5, by detail i mean detailed info for each row of uploaded file result, them being correctly uploaded, skip due to whichever field missng data or match already existing row".
+
+### Part A — JoinLogic dropdown label bug + full hardcode removal
+
+**The reported bug** ("display field in comparison showing the field name it takes from instead of the name I gave it") was `frontend/src/pages/JoinLogic/index.jsx`'s dropdown option `label: c.col_name || c.field_name` — showed the raw Excel column header (e.g. `"TRACE NUMBER"`) instead of the user-assigned `field_name` (e.g. `"trace"`). One-line fix: `label: c.field_name`.
+
+**The bigger issue underneath** (why the dropdown often showed nothing useful for Core Banking Đến at all): `frontend/src/pages/JoinLogic/index.jsx`'s `SOURCE_DIRECTION_TYPE_CODE` and `backend/app/modules/reconciliation/engine_flex.py`'s `_SOURCE_TYPE_CODE`/`_ROW_FILTER` were **hardcoded maps from `(source, direction)` → a specific `type_code` string**. This breaks the moment a user creates more than one Core Banking type (exactly what happened — user split "Core Banking" into "Core Banking Đi"/"Core Banking Đến" via FileTypeSettings, and separately the seed bug from the previous session's Part A had already produced a stray duplicate) — the hardcoded map still pointed at the one original `type_code`, so the new/renamed types were invisible to both JoinLogic and the reconcile engine.
+
+**Design insight that simplified the fix**: read `unified_db_builder.py` in full before designing anything. Core Banking's credit/debit split already happens **per-row**, not per-type — `_CORE_ROW_FILTER` checks whether `số_tiền_ghi_có`/`số_tiền_ghi_nợ` has a value on each row. So Core doesn't need a `direction` tag at all, only `source="Core"`; any number of Core-tagged types get unioned and row-filtered. This avoided building an over-engineered per-type direction-config system.
+
+**Fix**: replaced every hardcoded map with data-driven resolution off `fields_schema.source`/`fields_schema.direction` (new optional fields on each type). Full chain:
+- `backend/app/db/seed.py`: seed's 4 unambiguous types (`swift_di`, `swift_den`, `napas_di`, `napas_den`) now carry `source`/`direction` in their seed schema. New `migrate_type_source_direction()` (runs once at startup, called from `main.py`'s `lifespan()` after `seed_flex()`) backfills those same 4 for already-deployed DBs — **deliberately skips Core**, since which existing Core type(s) should get tagged is ambiguous and needs a human decision.
+- `engine_flex.py`: deleted `_SOURCE_TYPE_CODE`/`_ROW_FILTER`; added `resolve_type_ids(source, direction)` (DB query via `JSON_VALUE`, cached in `_source_resolve_cache`) and `_resolve_and_load(source, direction)` (unions + applies `_CORE_ROW_FILTER` for Core, single-type lookup otherwise). `run_flex_reconcile()`'s error message now explains the actual cause: `"Không tìm thấy loại file nào gán Nguồn=X — vào Cấu hình loại file để gán."`
+- `unified_db_builder.py`: `load_by_source(source, direction=None)` replaces the old direct `load('swift_di')`-style calls for everything except `napas_di_ktc` (kept as a direct type_code lookup, that one's genuinely unambiguous/singular).
+- `JoinLogic/index.jsx`: `fieldsForSource()` now filters the live `types` list by `fields_schema.source`/`direction` (Core: union+dedupe all `source==='Core'` matches) instead of a hardcoded map. Warning message when nothing resolves now explains *why* (untagged type vs. genuinely-unsupported "Cả hai" for Swift/NAPAS).
+- `FileTypeSettings/index.jsx`: `TypeCard`'s edit form gained **Nguồn dữ liệu** (Select: Swift/Core/NAPAS) and **Chiều giao dịch** (Select: Đi/Đến, hidden for Core) — this is how a user tags a type going forward, including for Core.
+
+**Verified against real local data**: retagged the user's actual Core Banking type(s) via the live API, then confirmed `_build_from_db()`'s total row count (15,534) and `run_flex_reconcile()`'s status distribution (6,939/2,415/18/5/5, config_id=3) were **byte-identical** to the pre-refactor baseline recorded in the previous session's entry — the refactor is a pure resolution-mechanism swap, not a behavior change.
+
+**Follow-up the user still needs to do**: go into FileTypeSettings and explicitly assign `Nguồn dữ liệu = Core` to whichever Core Banking type(s) are the real ones (migration deliberately left this untagged, see above) — reconcile will fail with a clear error for any Core-involving config until this is done. Also: the stray duplicate "Core Banking" row flagged in the previous session's entry still needs manual deletion via the 🗑 button — unrelated to this fix, still outstanding.
+
+### Part B — Required-field validation silently bypassed
+
+**The reported bug** ("rule can be bypassed? field trace is marked required, but the raw view shows a row where it's empty"). Root cause in `backend/app/modules/flex/router.py`'s upload-persist loop: a row was classified as safely-skippable "blank" by checking `all(row_json.get(f) is None for f in required_fields)` — for a schema with **exactly one** required field, "the one required field is empty" and "every required field is empty" are the same condition, so a row that had real data in its *other*, non-required columns but was missing its one required field got silently classified as a blank/skippable row instead of rejected — no error, no log entry, and (this was the actual visible bug) **the row still got inserted** with the required field `null`.
+
+**Fix**: separated blank-detection from rejection-detection properly.
+```python
+is_blank_row = all(v is None for k, v in row_json.items() if not k.startswith("_"))  # ALL fields, not just required
+if is_blank_row:
+    skip_count += 1; continue
+missing = [f for f in required_fields if row_json.get(f) is None]
+if missing:
+    rejected_count += 1; continue   # row is NOT inserted
+```
+Also fixed the empty-cell detection itself (Part C below) since the required-field check depends on it being accurate.
+
+**Verified**: caught an intermediate version of this fix regressing on exactly the single-required-field case via a live multipart upload through a throwaway type (5 rows covering blank/rejected/duplicate/saved×2) — first attempt at the fix used `all(... for f in required_fields)` for blank-detection (the same bug pattern, just moved), which classified a genuinely-non-blank-but-missing-required row as `blank`. Corrected to check all fields; re-verified the same 5-row test produces the correct 4-way split (2 saved, 1 rejected with reason, 1 duplicate, 1 truly blank), and separately reran the real `Core.xlsx` file through the full simulation — same 17 rejected rows as the pre-existing baseline (rows genuinely missing `teller`/`sequence`/`trace`), 0 blank, 15,441 would-save — confirming no regression on real production-shaped data.
+
+### Part C — "nan" instead of blank
+
+**Root cause**: pandas/openpyxl empty-cell representation isn't a single consistent shape — depending on version and the `dtype=str` read option, an empty cell can surface as `None`, `float('nan')`, or the **literal string** `"nan"`. The existing code only checked `raw is None or pd.isna(raw)`, which doesn't catch the stringified case. Added `_is_empty_cell(raw)` in `flex/router.py`: for strings, checks `raw.strip() in ("", "nan")`; otherwise `raw is None or pd.isna(raw)`. Used uniformly in `_parse_value()`, the required-field check, and the `allowed_values` check. Verified against a synthetic sweep of `None, float('nan'), "nan", "", "  ", "hello", "0", 0, "nan ", "NaN"` — all classified correctly (note: `"NaN"` capitalized is intentionally treated as non-empty text, not blank — only exact lowercase `"nan"` from the string-coercion path is special-cased, since a real allowed value could theoretically be that string and case-sensitive matching avoids surprising data loss on an edge case not actually observed in production data).
+
+### Part D — Suppress built-in `#` column when schema has its own index column
+
+**The reported bug** ("# column and stt column overlap?"). `DataStorage/index.jsx`'s raw-data table always rendered a synthetic `#` row-index column in addition to whatever real columns the schema defines — redundant when the schema already has its own `STT` (sequence) column. Fixed: `hasOwnIndexCol = allCols.some(c => c.field_name?.toLowerCase() === 'stt')`, and the `#` `<th>`/`<td>` (plus the empty-state row's `colSpan`) only render when `!hasOwnIndexCol`.
+
+### Part E — Per-row upload detail (row_log)
+
+**The ask**: "detailed info for each row of uploaded file result, them being correctly uploaded, skip due to whichever field missing data or match already existing row" — previously the upload response only returned aggregate counts + a capped error list, with nothing persisted for later viewing (the ask included "does that require new table to store?").
+
+**Decision**: no new table — added `uploadedFiles.row_log NVARCHAR(MAX)` (guarded `ALTER TABLE` in `seed.py` for already-deployed DBs, plus in the `CREATE TABLE` for fresh installs), one JSON blob per upload listing every row's outcome (`{row, status, reason?}`, statuses: `saved`/`duplicate`/`rejected`/`blank`, see Part B). New endpoint `GET /flex/files/{file_id}/row-log`, paginated (`page`/`page_size`) with optional `status` filter, returns `{rows, total, counts, available}`. `available: false` for uploads that predate this feature (no `row_log` persisted yet) so the frontend can show "not available for this upload" instead of an empty table.
+
+Frontend: `DataInput/index.jsx` History tab gained a "Xem chi tiết" button per row opening `RowLogModal` — status-filter chips (built from counts), paginated table via the shared `Pagination` component. Upload result panel also now surfaces `rejected_count` (previously only `duplicate_count`/`skip_count`/`error_count` were shown, so a rejected-row event had no visible signal beyond the capped `errors` array).
+
+**Verified** via the same 5-row throwaway-type multipart test used in Part B: `row_log` correctly recorded all 4 outcomes with the right `reason` text on `rejected`/`duplicate`, `GET /flex/files/{id}/row-log` returned correct `counts` and paginated correctly; cleaned up (purged rows/file, deleted the throwaway type) after.
+
+### Build/compile checks
+`py_compile` clean on all 5 touched backend files (`flex/router.py`, `seed.py`, `main.py`, `engine_flex.py`, `unified_db_builder.py`); `npx vite build` clean (no new warnings beyond the pre-existing chunk-size notice).
+
+### Currently open / not yet resolved (this entry)
+- **Nothing from this entry is committed yet.** Ask before committing/pushing.
+- **User follow-up required after deploy**: (1) assign `Nguồn dữ liệu = Core` to the real Core Banking type(s) via FileTypeSettings — Core-involving reconcile configs will error with a clear message until this is done; (2) the stray duplicate Core Banking row (from a previous session's seed bug, already fixed going forward) still needs manual deletion.
+- **Test uvicorn instances used for verification in this entry were all started/stopped locally, temp output files cleaned up** — no server left listening, no test data left in the DB (all throwaway types/files were purged+deleted after each check).

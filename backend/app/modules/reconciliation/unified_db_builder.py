@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from app.db.connection import db_cursor
-from app.modules.reconciliation.engine_flex import _get_type_id, _load_rows, _make_key
+from app.modules.reconciliation.engine_flex import _get_type_id, _load_rows, _make_key, resolve_type_ids
 from app.modules.reconciliation.rows_builder import (
     _to_int, _to_str,
     _napas_time_fmt, _swift_status, _infer_recon_status,
@@ -122,16 +122,31 @@ def _build_match_index(rows: list[dict], match_fields: list[dict]) -> dict[tuple
 
 
 def _build_from_db() -> list[dict]:
-    def load(type_code, row_filter=None):
+    def load_by_type_code(type_code, row_filter=None):
         tid = _get_type_id(type_code)
         return _load_rows(tid, row_filter) if tid else []
 
-    swift_di_rows  = load('swift_di')
-    swift_den_rows = load('swift_den')
-    core_rows      = load('core_banking')
-    napas_di_rows  = load('napas_di')
-    napas_den_rows = load('napas_den')
-    napas_ktc_rows = load('napas_di_ktc')
+    def load_by_source(source, direction=None):
+        """Union rows from every active type tagged this source(+direction)
+        in FileTypeSettings — not a single hardcoded type_code, so splitting
+        a source into multiple uploads (e.g. Core Banking split by teller
+        batch) is picked up automatically without touching this function."""
+        rows = []
+        for tid in resolve_type_ids(source, direction):
+            rows.extend(_load_rows(tid))
+        return rows
+
+    swift_di_rows  = load_by_source('Swift', 'Đi')
+    swift_den_rows = load_by_source('Swift', 'Đến')
+    core_rows      = load_by_source('Core')
+    napas_di_rows  = load_by_source('NAPAS', 'Đi')
+    napas_den_rows = load_by_source('NAPAS', 'Đến')
+    # napas_di_ktc (failed/KTC transactions) isn't part of the source+direction
+    # model above — it's a 3rd axis (success vs failure) that would collide
+    # with napas_di if tagged the same source+direction, so it stays resolved
+    # by its fixed type_code, same as before. Low risk: unlike Core, nothing
+    # has asked to split this into multiple uploads.
+    napas_ktc_rows = load_by_type_code('napas_di_ktc')
 
     fields = _load_join_field_map()
     napas_di_fields  = fields.get(("Swift", "NAPAS", "Đi"), [])

@@ -18,31 +18,34 @@ const toConfig = ({ name, leftSource, rightSource, direction, joinType, matchFie
 
 /*
  * Mỗi rule so khớp được định nghĩa ở cấp nguồn (Swift / Core / NAPAS),
- * không phải subtable. Backend tự map sang bảng cụ thể dựa vào direction
- * (phải khớp CHÍNH XÁC với _SOURCE_TYPE_CODE trong engine_flex.py):
- *   Swift + Đi   → swift_di       Swift + Đến  → swift_den
- *   NAPAS + Đi   → napas_di       NAPAS + Đến  → napas_den
- *   Core  + Đi / Đến / Cả hai → core_banking (1 bảng dùng chung 2 chiều)
- * Swift/NAPAS + "Cả hai" KHÔNG có type_code (2 chiều = 2 bảng cột khác
- * nhau) — backend sẽ không resolve được, tránh chọn tổ hợp này.
+ * không phải subtable. Backend resolve nguồn → type dựa vào tag
+ * fields_schema.source/direction của từng loại file (gán trong Cấu hình
+ * loại file), KHÔNG còn hardcode type_code ở đây — xem
+ * resolve_type_ids()/_resolve_and_load() trong engine_flex.py. Core không
+ * cần tag direction: dữ liệu Core được chia Đi/Đến theo cột SỐ TIỀN GHI
+ * CÓ/GHI NỢ của từng dòng, không theo loại file, nên TẤT CẢ loại file có
+ * source="Core" (dù 1 file gộp hay nhiều file tách theo teller/batch) đều
+ * được gộp lại làm nguồn trường cho Core ở đây.
+ * Swift/NAPAS + "Cả hai" không resolve được (2 chiều = 2 schema cột khác
+ * nhau) — tránh chọn tổ hợp này.
  */
 
-const SOURCE_DIRECTION_TYPE_CODE = {
-  'Swift|Đi': 'swift_di',   'Swift|Đến': 'swift_den',
-  'NAPAS|Đi': 'napas_di',   'NAPAS|Đến': 'napas_den',
-  'Core|Đi': 'core_banking', 'Core|Đến': 'core_banking', 'Core|Cả hai': 'core_banking',
-}
-
 function fieldsForSource(types, source, direction) {
-  const typeCode = SOURCE_DIRECTION_TYPE_CODE[`${source}|${direction}`]
-  if (!typeCode) return null
-  const t = types.find(t => t.fields_schema?.type_code === typeCode)
-  if (!t) return null
-  return (t.fields_schema?.columns || []).map(c => ({
-    field_name: c.field_name,
-    label: c.col_name || c.field_name,
-    data_type: c.data_type,
-  }))
+  const matches = source === 'Core'
+    ? types.filter(t => t.fields_schema?.source === 'Core')
+    : types.filter(t => t.fields_schema?.source === source && t.fields_schema?.direction === direction)
+  if (matches.length === 0) return null
+
+  const seen = new Set()
+  const fields = []
+  for (const t of matches) {
+    for (const c of (t.fields_schema?.columns || [])) {
+      if (seen.has(c.field_name)) continue
+      seen.add(c.field_name)
+      fields.push({ field_name: c.field_name, label: c.field_name, data_type: c.data_type })
+    }
+  }
+  return fields
 }
 
 const SOURCES = ['Swift', 'Core', 'NAPAS']
@@ -379,7 +382,9 @@ function LogicFormModal({ open, editing, types, onClose, onSave }) {
       <FormRow label="Trường so khớp (trái = phải)" hint="Các cặp trường dùng để ghép giữa 2 nguồn — chọn từ cột thực tế đã cấu hình ở Cấu hình loại file">
         {noSchema && (
           <div style={{ marginBottom: 8, padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: radius.md, fontSize: 12, color: '#92400e' }}>
-            ⚠ {form.leftSource}/{form.rightSource} chưa hỗ trợ chiều "{form.direction}" ở dạng danh sách cột (mỗi chiều Đi/Đến là 1 loại file/schema riêng). Nhập tên trường thủ công — kiểm tra kỹ chính tả khớp với <b>field_name</b> trong Cấu hình loại file, nếu không rule sẽ không chạy được.
+            ⚠ Không tìm thấy loại file nào gán <b>Nguồn dữ liệu = {form.leftSource || form.rightSource}</b>
+            {form.direction !== 'Cả hai' && <> và <b>Chiều giao dịch = {form.direction}</b></>} trong <b>Cấu hình loại file</b>.
+            {form.direction === 'Cả hai' ? ' Swift/NAPAS không hỗ trợ "Cả hai" (2 chiều là 2 schema cột khác nhau).' : ' Vào Cấu hình loại file để gán, hoặc nhập tên trường thủ công bên dưới — kiểm tra kỹ chính tả khớp với field_name, nếu không rule sẽ không chạy được.'}
           </div>
         )}
         {form.matchFields.map((mf, i) => {

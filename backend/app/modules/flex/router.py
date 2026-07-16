@@ -210,6 +210,37 @@ def list_files(
         }
 
 
+@router.get("/files/{file_id}/row-log")
+def get_file_row_log(
+    file_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    status: str | None = Query(None),
+) -> dict[str, Any]:
+    """Per-row outcome for one upload — saved / duplicate / rejected (missing
+    a required field) / blank (separator row, harmless). Only recorded for
+    uploads made after this feature shipped; older files return null."""
+    with db_cursor() as cur:
+        cur.execute("SELECT row_log FROM uploadedFiles WHERE id = ?", file_id)
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "File not found")
+    if not row[0]:
+        return {"rows": [], "total": 0, "counts": {}, "available": False}
+
+    log: list[dict] = json.loads(row[0])
+    counts: dict[str, int] = {}
+    for entry in log:
+        counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+
+    if status:
+        log = [e for e in log if e["status"] == status]
+
+    total = len(log)
+    start = (page - 1) * page_size
+    return {"rows": log[start:start + page_size], "total": total, "counts": counts, "available": True}
+
+
 # ── File management ───────────────────────────────────────────────────────────
 
 @router.delete("/purge", status_code=200)
@@ -337,6 +368,7 @@ async def upload_file(
 
     # 3. Parse + validate rows
     rows_data: list[dict[str, Any]] = []
+    row_excel_nums: list[int] = []   # parallel to rows_data — 1-based Excel row number, for the per-row upload log
     errors: list[dict] = []
 
     for row_idx, (_, excel_row) in enumerate(df.iterrows()):
@@ -360,7 +392,7 @@ async def upload_file(
 
             # Required check
             excel_row_num = header_idx + row_idx + 2  # 1-based Excel row number
-            if col_def.get("required") and (raw_val is None or str(raw_val).strip() == ""):
+            if col_def.get("required") and _is_empty_cell(raw_val):
                 errors.append({"row": excel_row_num, "field": field_name, "reason": "Trường bắt buộc bị thiếu"})
                 row_json[field_name] = None
                 continue
@@ -368,7 +400,7 @@ async def upload_file(
             # Type coercion + allowed values check
             parsed = _parse_value(raw_val, col_def.get("data_type", "string"))
             av = col_def.get("allowed_values") or []
-            if av and raw_val is not None and str(raw_val).strip() not in av:
+            if av and not _is_empty_cell(raw_val) and str(raw_val).strip() not in av:
                 errors.append({"row": excel_row_num, "field": field_name,
                                "reason": f"Giá trị '{raw_val}' không hợp lệ. Cho phép: {', '.join(av)}"})
             row_json[field_name] = parsed
@@ -377,6 +409,7 @@ async def upload_file(
         if sheet_day:
             row_json["_sheet_day"] = sheet_day
         rows_data.append(row_json)
+        row_excel_nums.append(header_idx + row_idx + 2)  # 1-based Excel row number
 
     # 4. Persist to DB — one row per transaction
     unique_key: list[str] = schema_obj.get("unique_key") or []
@@ -416,18 +449,39 @@ async def upload_file(
                 except Exception:
                     pass
 
-        saved_count = 0
-        dup_count   = 0
-        skip_count  = 0
-        for row_json in rows_data:
-            # Skip rows where every required field is None (blank rows between header/data)
-            if required_fields and all(row_json.get(f) is None for f in required_fields):
-                skip_count += 1
-                continue
+        saved_count    = 0
+        dup_count      = 0
+        skip_count     = 0   # every field on the row empty — blank separator row, harmless
+        rejected_count = 0   # required field(s) missing but the row has other data — real problem, not saved
+        row_log: list[dict] = []   # per-row outcome, shown via "Xem chi tiết" in Lịch sử tải lên
+        for row_json, excel_row_num in zip(rows_data, row_excel_nums):
+            if required_fields:
+                # "Blank row" must mean every FIELD is empty, not just every
+                # required one — checking only required fields breaks for any
+                # schema with a single required column (all-required-empty and
+                # some-required-empty become the same condition), silently
+                # reclassifying a real row missing its one required field as
+                # a harmless blank row instead of rejecting it.
+                is_blank_row = all(v is None for k, v in row_json.items() if not k.startswith("_"))
+                if is_blank_row:
+                    skip_count += 1
+                    row_log.append({"row": excel_row_num, "status": "blank"})
+                    continue
+                missing = [f for f in required_fields if row_json.get(f) is None]
+                if missing:
+                    # Previously this only skipped rows with ALL required fields
+                    # missing, so a row with e.g. trace = null (regex_extract
+                    # failed to match) but other required fields present would
+                    # still get inserted — "required" was validated (logged as
+                    # an error) but never actually enforced. Now it's dropped.
+                    rejected_count += 1
+                    row_log.append({"row": excel_row_num, "status": "rejected", "reason": f"Thiếu trường bắt buộc: {', '.join(missing)}"})
+                    continue
             if unique_key:
                 k = _row_key(type_id, unique_key, row_json)
                 if k and k in existing_keys:
                     dup_count += 1
+                    row_log.append({"row": excel_row_num, "status": "duplicate", "reason": f"Trùng dữ liệu đã có ({', '.join(unique_key)})"})
                     continue
                 if k:
                     existing_keys.add(k)
@@ -436,6 +490,12 @@ async def upload_file(
                 file_id, 0, json.dumps(row_json, ensure_ascii=False),
             )
             saved_count += 1
+            row_log.append({"row": excel_row_num, "status": "saved"})
+
+        cur.execute(
+            "UPDATE uploadedFiles SET row_log = ? WHERE id = ?",
+            json.dumps(row_log, ensure_ascii=False), file_id,
+        )
 
     mark_stale_by_type(type_id)
     clear_db_rows_cache()
@@ -444,6 +504,7 @@ async def upload_file(
         "row_count":      saved_count,
         "duplicate_count": dup_count,
         "skip_count":     skip_count,
+        "rejected_count": rejected_count,
         "error_count":    len(errors),
         "errors":         errors[:10],
         "upload_name":    upload_name,
@@ -451,8 +512,23 @@ async def upload_file(
     }
 
 
+def _is_empty_cell(raw) -> bool:
+    """Empty Excel cells can reach here as three different "nothing" shapes
+    depending on pandas/openpyxl version: Python None; a float NaN (plain
+    `raw is None` misses it, NaN is a float not None — needs pd.isna, and
+    pd.isna() on a string raises for some inputs, so only call it once we
+    know raw isn't a string); or — on some dtype=str + NaN read combinations
+    — the literal 3-char string "nan" already baked in at read time
+    (str(float('nan')) == "nan"), which pd.isna() does NOT catch since by
+    then it's a genuine non-empty string. Any of the three must count as
+    empty, or it serializes as the literal text "nan" instead of null."""
+    if isinstance(raw, str):
+        return raw.strip() in ("", "nan")
+    return raw is None or pd.isna(raw)
+
+
 def _parse_value(raw, data_type: str):
-    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+    if _is_empty_cell(raw):
         return None
     try:
         if data_type == "integer":

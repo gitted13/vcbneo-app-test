@@ -22,7 +22,7 @@ _JOIN_CONFIGS = [
         ],
     },
     {
-        # Đi = ghi có (credit) per _ROW_FILTER in engine_flex.py và data flow
+        # Đi = ghi có (credit) per _CORE_ROW_FILTER in engine_flex.py và data flow
         # "Swift đi → NAPAS đi TC → Core Ghi có" (docs/handover.md).
         # teller thêm vào để tránh seq trùng giữa các ngày khác nhau (seq reset
         # theo ca/teller — xác nhận 5 trường hợp trùng thật trong dữ liệu sản
@@ -158,7 +158,7 @@ TYPES = [
     {
         "upload_name": "Swift Report đi",
         "fields_schema": {
-            "type_code": "swift_di", "description": "",
+            "type_code": "swift_di", "description": "", "source": "Swift", "direction": "Đi",
             "unique_key": ["trace_number", "seq"],
             "columns": [
                 {"col_name": "THỜI GIAN",         "field_name": "thời_gian",          "data_type": "string",  "required": True,  "allowed_values": [], "note": ""},
@@ -187,7 +187,7 @@ TYPES = [
     {
         "upload_name": "Swift Report đến",
         "fields_schema": {
-            "type_code": "swift_den", "description": "",
+            "type_code": "swift_den", "description": "", "source": "Swift", "direction": "Đến",
             "unique_key": ["trace", "seq"],
             "columns": [
                 {"col_name": "MESSAGE ID",         "field_name": "message_id",         "data_type": "string",   "required": False, "allowed_values": [], "note": ""},
@@ -214,7 +214,7 @@ TYPES = [
     {
         "upload_name": "Core Banking",
         "fields_schema": {
-            "type_code": "core_banking", "description": "",
+            "type_code": "core_banking", "description": "", "source": "Core",
             "unique_key": ["trace", "sequence", "số_tiền_ghi_nợ", "số_tiền_ghi_có"],
             "columns": [
                 {"col_name": "STT",            "field_name": "stt",             "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
@@ -237,7 +237,7 @@ TYPES = [
     {
         "upload_name": "Napas đi",
         "fields_schema": {
-            "type_code": "napas_di", "description": "",
+            "type_code": "napas_di", "description": "", "source": "NAPAS", "direction": "Đi",
             "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Số tài khoản/Số thẻ", "field_name": "số_tài_khoản/số_thẻ",   "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
@@ -259,7 +259,7 @@ TYPES = [
     {
         "upload_name": "Napas đến",
         "fields_schema": {
-            "type_code": "napas_den", "description": "",
+            "type_code": "napas_den", "description": "", "source": "NAPAS", "direction": "Đến",
             "unique_key": ["số_trace", "ngày_gd", "giờ_gd", "số_tiền"],
             "columns": [
                 {"col_name": "Mã GD",               "field_name": "mã_gd",                "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
@@ -356,10 +356,24 @@ def init_reconcile_tables():
                     original_name   NVARCHAR(500),
                     is_active       BIT NOT NULL DEFAULT 1,
                     error_detail    NVARCHAR(MAX),
+                    row_log         NVARCHAR(MAX),
                     created         DATETIME NOT NULL DEFAULT GETDATE(),
                     modified        DATETIME NOT NULL DEFAULT GETDATE(),
                     created_by      NVARCHAR(100) NOT NULL DEFAULT 'system'
                 )
+            """)
+            # row_log: per-row upload outcome (saved/duplicate/rejected/blank),
+            # added after uploadedFiles already existed in deployed DBs — CREATE
+            # TABLE IF NOT EXISTS above won't retrofit the column onto an
+            # existing table, so ALTER it in explicitly (safe: nullable, no
+            # default needed, existing rows just read back as "no detail
+            # available" for uploads made before this feature existed).
+            cur.execute("""
+                IF NOT EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'uploadedFiles' AND COLUMN_NAME = 'row_log'
+                )
+                ALTER TABLE uploadedFiles ADD row_log NVARCHAR(MAX) NULL
             """)
             cur.execute("""
                 IF NOT EXISTS (
@@ -483,6 +497,50 @@ def seed_flex():
         print("[seed_flex] OK")
     except Exception as exc:
         print(f"[seed_flex] error: {exc}")
+
+
+# Existing databases (from before source/direction resolution existed) won't
+# have these tags on their already-created types yet. Only the 4 Swift/NAPAS
+# type_codes are unambiguous enough to auto-fill — Core is deliberately left
+# alone: a deployment can already have more than one Core-tagged candidate
+# (e.g. an original combined upload plus a later Đi/Đến split), and guessing
+# wrong here would silently point reconciliation at the wrong data. The user
+# must assign Core's source in FileTypeSettings themselves.
+_UNAMBIGUOUS_SOURCE_DIRECTION = {
+    "swift_di":  ("Swift", "Đi"),
+    "swift_den": ("Swift", "Đến"),
+    "napas_di":  ("NAPAS", "Đi"),
+    "napas_den": ("NAPAS", "Đến"),
+}
+
+
+def migrate_type_source_direction():
+    """One-time, idempotent backfill: tag the 4 unambiguous seeded types with
+    source/direction if they predate that concept and don't have it yet."""
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id, fields_schema FROM uploadedTypes WHERE is_active = 1")
+            rows = cur.fetchall()
+            updated = 0
+            for type_id, schema_raw in rows:
+                try:
+                    schema = json.loads(schema_raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if schema.get("source"):
+                    continue  # already tagged (by this migration, or manually in FileTypeSettings)
+                mapping = _UNAMBIGUOUS_SOURCE_DIRECTION.get(schema.get("type_code"))
+                if not mapping:
+                    continue
+                schema["source"], schema["direction"] = mapping
+                cur.execute(
+                    "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
+                    json.dumps(schema, ensure_ascii=False), type_id,
+                )
+                updated += 1
+        print(f"[migrate_type_source_direction] OK ({updated} type(s) tagged)")
+    except Exception as exc:
+        print(f"[migrate_type_source_direction] error: {exc}")
 
 
 def seed_reconcile_configs():

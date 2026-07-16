@@ -117,6 +117,21 @@ INSERT INTO uploadedTypes (...) OUTPUT INSERTED.id VALUES (...)
 
 `string` | `integer` | `number` | `date` | `datetime` | `boolean`
 
+### Ô trống trong file Excel — `_is_empty_cell()`
+
+Đừng tự viết `raw is None` hay `pd.isna(raw)` riêng lẻ để kiểm tra ô trống — dùng `_is_empty_cell(raw)` trong `flex/router.py`. Lý do: tùy phiên bản pandas/openpyxl và việc đọc bằng `dtype=str`, một ô trống có thể tới dưới 3 dạng khác nhau: `None`, `float('nan')`, hoặc **chuỗi ký tự** `"nan"`/`""`/khoảng trắng. `pd.isna()` không bắt được trường hợp đã bị stringify thành `"nan"`. `_is_empty_cell()` xử lý cả 3 dạng, dùng thống nhất trong `_parse_value()`, kiểm tra `required`, và kiểm tra `allowed_values`.
+
+### Nguồn/chiều giao dịch — `source` / `direction` trong `fields_schema` (không hardcode map)
+
+Mỗi loại file trong `uploadedTypes.fields_schema` có thể gắn `"source"` (`Swift`/`Core`/`NAPAS`) và `"direction"` (`Đi`/`Đến`, bỏ qua với Core). Đây là cách **duy nhất** để hệ thống biết loại file nào ứng với nguồn/chiều nào khi đối soát hoặc so khớp trường — **không còn map hardcode `{(source, direction): type_code}`** ở bất cứ đâu trong code (đã xóa `_SOURCE_TYPE_CODE`/`_ROW_FILTER` cũ trong `engine_flex.py`).
+
+- `engine_flex.py`'s `resolve_type_ids(source, direction)` — query `JSON_VALUE(fields_schema,'$.source')`/`'$.direction'`, có cache (`_source_resolve_cache`, xóa qua `clear_type_id_cache()`).
+- Core Banking đặc biệt: chỉ cần gắn `source="Core"` (không cần `direction`) — chiều Ghi có/Ghi nợ được xác định **theo từng dòng dữ liệu** (kiểm tra `số_tiền_ghi_có`/`số_tiền_ghi_nợ` có giá trị hay không), không theo loại file. Vì vậy 1 hoặc nhiều loại file Core đều gắn `source="Core"`, hệ thống tự UNION tất cả rồi lọc theo dòng bằng `_CORE_ROW_FILTER` (đây là logic nghiệp vụ hợp lệ, không phải hardcode type_code).
+- `unified_db_builder.py`'s `load_by_source(source, direction=None)` dùng `resolve_type_ids` để union rows của mọi type khớp.
+- Frontend (`JoinLogic/index.jsx`'s `fieldsForSource()`) cũng resolve theo `fields_schema.source`/`direction` thay vì map hardcode — để hiện đúng danh sách cột khi chọn nguồn/chiều trong modal so khớp trường.
+- **Bắt buộc khi thêm loại file mới liên quan đối soát**: vào FileTypeSettings, gán đúng `Nguồn dữ liệu` (và `Chiều giao dịch` nếu không phải Core) cho loại file đó — nếu bỏ trống, đối soát sẽ báo lỗi "Không tìm thấy loại file nào gán Nguồn=... — vào Cấu hình loại file để gán."
+- Migration một lần (`migrate_type_source_direction()` trong `seed.py`, chạy khi backend khởi động) tự gắn `source`/`direction` cho 4 loại Swift/NAPAS đã biết rõ (`swift_di`, `swift_den`, `napas_di`, `napas_den`) nếu chưa có — **cố ý không đụng vào Core** vì có thể có nhiều loại file Core Banking đã tồn tại, không rõ loại nào nên gắn, người dùng cần tự gán qua UI.
+
 ---
 
 ## API Endpoints
@@ -135,6 +150,22 @@ Base URL: `/api/v1`
 | POST | `/flex/upload` | Upload file (multipart: type_id + file) |
 | POST | `/flex/scan-file` | Quét header file mẫu, trả về cột + suggested_type |
 | GET | `/flex/rows?type_id=` | Lấy dữ liệu đã parse |
+| GET | `/flex/files/{file_id}/row-log` | Chi tiết từng dòng của 1 lần upload (saved/rejected/duplicate/blank) |
+
+### Chi tiết từng dòng upload — `row_log`
+
+Mỗi lần upload, backend ghi lại trạng thái từng dòng Excel (không chỉ tổng số lỗi) vào cột `uploadedFiles.row_log` (JSON), trả về qua `GET /flex/files/{file_id}/row-log` (phân trang `page`/`page_size`, lọc theo `status`). 4 trạng thái mỗi dòng:
+
+| status | Ý nghĩa |
+|---|---|
+| `saved` | Lưu thành công |
+| `duplicate` | Trùng dữ liệu đã có (theo `unique`/khóa trùng đã cấu hình) |
+| `rejected` | Thiếu trường bắt buộc (kèm `reason` liệt kê tên field) |
+| `blank` | Cả dòng trống hoàn toàn (dòng phân cách/dòng thừa trong Excel) — không tính là lỗi |
+
+**Lưu ý quan trọng khi phân biệt `blank` vs `rejected`:** dòng được coi là `blank` chỉ khi **TẤT CẢ** các trường đều rỗng — không chỉ các trường `required`. Nếu kiểm tra nhầm chỉ dựa vào các trường `required`, một schema chỉ có 1 trường required sẽ luôn coi "thiếu trường required" và "cả dòng trống" là một — dòng có dữ liệu thật (các cột khác có giá trị) nhưng thiếu đúng field required đó sẽ bị xếp nhầm thành `blank` (bỏ qua âm thầm) thay vì `rejected` (báo lỗi rõ ràng). Xem `frontend/src/pages/DataInput/index.jsx`'s `RowLogModal` để xem trực quan.
+
+Frontend: nút "Xem chi tiết" trên mỗi dòng lịch sử upload (`DataInput`'s History tab) mở `RowLogModal`, phân trang qua `Pagination` chung, lọc theo status bằng chip.
 
 ### Scan File — tự động phát hiện header và infer kiểu dữ liệu
 

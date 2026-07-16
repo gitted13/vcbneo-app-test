@@ -164,6 +164,11 @@ export default function DataStorage() {
   const allCols     = (schema.columns || [])
   const displayCols = allCols  // show all cols including fixed_value
 
+  // Schema already has its own row-index column (e.g. "STT" from the source
+  // file) — suppress the built-in "#" column so the table doesn't show two
+  // sequential-number columns side by side.
+  const hasOwnIndexCol = allCols.some(c => c.field_name?.toLowerCase() === 'stt')
+
   // Detect first real date column in active schema (excluding columns that
   // are schema'd "date" but actually hold a time value, e.g. pctime).
   const dateCol = allCols.find(c => isDateType(c) && !isTimeField(c))
@@ -309,7 +314,7 @@ export default function DataStorage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: C.neutralBg }}>
-                    <th style={TH}>#</th>
+                    {!hasOwnIndexCol && <th style={TH}>#</th>}
                     {displayCols.map(col => (
                       <th key={col.field_name} style={TH}>{colLabel(col)}</th>
                     ))}
@@ -318,15 +323,17 @@ export default function DataStorage() {
                 <tbody>
                   {rows.length === 0 ? (
                     <tr>
-                      <td colSpan={displayCols.length + 1} style={{ padding: 32, textAlign: 'center', color: C.textMuted }}>
+                      <td colSpan={displayCols.length + (hasOwnIndexCol ? 0 : 1)} style={{ padding: 32, textAlign: 'center', color: C.textMuted }}>
                         {search ? 'Không tìm thấy bản ghi phù hợp' : 'Chưa có dữ liệu — hãy upload file trước'}
                       </td>
                     </tr>
                   ) : rows.map((row, i) => (
                     <tr key={row._id ?? i} style={{ borderBottom: `1px solid ${C.cardBorder}`, background: i % 2 ? C.neutralBg : '#fff' }}>
-                      <td style={{ padding: '7px 12px', color: C.textLight, fontSize: 11, whiteSpace: 'nowrap' }}>
-                        {(page - 1) * pageSize + i + 1}
-                      </td>
+                      {!hasOwnIndexCol && (
+                        <td style={{ padding: '7px 12px', color: C.textLight, fontSize: 11, whiteSpace: 'nowrap' }}>
+                          {(page - 1) * pageSize + i + 1}
+                        </td>
+                      )}
                       {displayCols.map(col => (
                         <td key={col.field_name} style={{ padding: '7px 14px', whiteSpace: 'nowrap' }}>
                           <CellValue value={row[col.field_name]} col={col} />

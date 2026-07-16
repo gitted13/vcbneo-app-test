@@ -16,24 +16,25 @@ from typing import Any, Callable
 
 from app.db.connection import db_cursor
 
-# ── Source → type_code mapping ────────────────────────────────────────────────
-
-_SOURCE_TYPE_CODE: dict[tuple[str, str], str] = {
-    ("Swift", "Đi"):     "swift_di",
-    ("Swift", "Đến"):    "swift_den",
-    ("NAPAS", "Đi"):     "napas_di",
-    ("NAPAS", "Đến"):    "napas_den",
-    ("Core",  "Đi"):     "core_banking",
-    ("Core",  "Đến"):    "core_banking",
-    ("Core",  "Cả hai"): "core_banking",
-}
-
-# Core has one type for both directions; filter by which amount field is non-zero.
-# Confirmed from data: NAPAS Đi transactions appear as ghi_có (credit) in Core;
-# NAPAS Đến transactions appear as ghi_nợ (debit) in Core.
-_ROW_FILTER: dict[tuple[str, str], Callable[[dict], bool]] = {
-    ("Core", "Đi"):  lambda d: bool(d.get("số_tiền_ghi_có")),
-    ("Core", "Đến"): lambda d: bool(d.get("số_tiền_ghi_nợ")),
+# ── Source/direction → type resolution ────────────────────────────────────────
+# Which uploadedTypes row(s) represent "Swift, Đi" or "Core" is now read from
+# each type's own fields_schema.source/direction (set in FileTypeSettings),
+# not hardcoded here. Previously this was a fixed {(source,direction): "swift_di"}
+# dict — any time a type got renamed or a source got split into multiple
+# uploads (e.g. Core Banking split into separate Đi/Đến files), the hardcoded
+# type_code would silently point at the wrong type, or a type sharing that
+# type_code by coincidence would win a `.find()`/lookup. See
+# docs/agent-notes.md for the incident this replaced.
+#
+# Core is intentionally NOT tagged with a direction: Core GL entries are
+# split into Đi/Đến per ROW (whichever of số_tiền_ghi_có/số_tiền_ghi_nợ is
+# populated), not per upload — so ALL types tagged source="Core" (whether
+# that's one combined upload or several split by teller/batch) are unioned
+# together first, then filtered by row content. Confirmed from data: ghi_có
+# entries are Đi-direction, ghi_nợ entries are Đến-direction.
+_CORE_ROW_FILTER: dict[str, Callable[[dict], bool]] = {
+    "Đi":  lambda d: bool(d.get("số_tiền_ghi_có")),
+    "Đến": lambda d: bool(d.get("số_tiền_ghi_nợ")),
 }
 
 
@@ -64,6 +65,64 @@ def _get_type_id(type_code: str) -> int | None:
     if result is not None:
         _type_id_cache[type_code] = result
     return result
+
+
+# (source, direction-or-None) → resolved type_id(s). direction=None only
+# valid for source="Core" (see module docstring above) — returns every
+# matching type_id, unioned by the caller. Any other source requires a
+# direction and resolves to exactly one type_id.
+_source_resolve_cache: dict[tuple[str, str | None], list[int]] = {}
+
+
+def resolve_type_ids(source: str, direction: str | None) -> list[int]:
+    """Active uploadedTypes tagged with this source (+ direction, for
+    Swift/NAPAS). Empty list means nothing is configured yet — callers
+    should surface that as an actionable error, not fail silently."""
+    cache_key = (source, direction)
+    cached = _source_resolve_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    with db_cursor() as cur:
+        if source == "Core":
+            cur.execute(
+                "SELECT id FROM uploadedTypes WHERE is_active = 1 AND JSON_VALUE(fields_schema,'$.source') = ?",
+                source,
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id FROM uploadedTypes
+                WHERE is_active = 1
+                  AND JSON_VALUE(fields_schema,'$.source') = ?
+                  AND JSON_VALUE(fields_schema,'$.direction') = ?
+                """,
+                source, direction,
+            )
+        result = [r[0] for r in cur.fetchall()]
+    if result:
+        _source_resolve_cache[cache_key] = result
+    return result
+
+
+def _resolve_and_load(source: str, direction: str) -> tuple[int | None, list[dict]]:
+    """Resolve (source, direction) to its rows. Core unions all source="Core"
+    types and filters by row content (see resolve_type_ids docstring);
+    everything else is exactly one type. Returns (representative_type_id,
+    rows) — type_id is None (and rows []) if nothing is configured yet."""
+    if source == "Core":
+        type_ids = resolve_type_ids("Core", None)
+        if not type_ids:
+            return None, []
+        row_filter = _CORE_ROW_FILTER.get(direction)
+        rows: list[dict] = []
+        for tid in type_ids:
+            rows.extend(_load_rows(tid, row_filter))
+        return type_ids[0], rows
+
+    type_ids = resolve_type_ids(source, direction)
+    if not type_ids:
+        return None, []
+    return type_ids[0], _load_rows(type_ids[0])
 
 
 def _load_rows(
@@ -407,22 +466,23 @@ def run_flex_reconcile(
         ensure_ascii=False,
     )
 
-    # 3. Resolve type codes → IDs
-    left_type_code  = _SOURCE_TYPE_CODE.get((left_source, direction))
-    right_type_code = _SOURCE_TYPE_CODE.get((right_source, direction))
+    # 3+4. Resolve source/direction → type(s), and load their rows. For Core
+    # this unions every type tagged source="Core" and splits Đi/Đến by row
+    # content (số_tiền_ghi_có vs số_tiền_ghi_nợ); for Swift/NAPAS it's a
+    # single type per (source, direction). left_type_id/right_type_id below
+    # are used only for reconcileResults' cache-invalidation columns — for a
+    # multi-type Core, that's the first matching type_id (a known, accepted
+    # limitation: mark_stale_by_type() on the other Core type(s) won't mark
+    # this result stale — soft UX gap, not a data-correctness one).
+    left_type_id, left_rows = _resolve_and_load(left_source, direction)
+    right_type_id, right_rows = _resolve_and_load(right_source, direction) if right_source else (None, [])
 
-    left_type_id  = _get_type_id(left_type_code)  if left_type_code  else None
-    right_type_id = _get_type_id(right_type_code) if right_type_code else None
-
-    if not left_type_id:
-        raise ValueError(f"Cannot resolve type for {left_source}/{direction}")
-
-    # 4. Load rows
-    left_filter  = _ROW_FILTER.get((left_source,  direction))
-    right_filter = _ROW_FILTER.get((right_source, direction))
-
-    left_rows  = _load_rows(left_type_id,  left_filter)
-    right_rows = _load_rows(right_type_id, right_filter) if right_type_id else []
+    if left_type_id is None:
+        raise ValueError(
+            f"Không tìm thấy loại file nào gán Nguồn={left_source}"
+            + (f", Chiều={direction}" if left_source != "Core" else "")
+            + " — vào Cấu hình loại file để gán."
+        )
 
     # 5. Index right side by join key
     right_index: dict[tuple, list] = {}
@@ -545,6 +605,7 @@ def clear_type_id_cache() -> None:
     no longer be valid. NOT called on plain file uploads, since a type's id
     doesn't change just because a new file was added for it."""
     _type_id_cache.clear()
+    _source_resolve_cache.clear()
 
 
 def mark_stale_by_type(type_id: int) -> None:

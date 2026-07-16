@@ -127,6 +127,11 @@ export const api = {
       if (status) params.set('status', status)
       return request(`/flex/files?${params}`)
     },
+    getFileRowLog: (fileId, { page = 1, pageSize = 50, status = '' } = {}) => {
+      const params = new URLSearchParams({ page, page_size: pageSize })
+      if (status) params.set('status', status)
+      return request(`/flex/files/${fileId}/row-log?${params}`)
+    },
     upload: (typeId, file) => {
       const fd = new FormData()
       fd.append('type_id', typeId)

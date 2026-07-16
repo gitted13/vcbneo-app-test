@@ -5,6 +5,7 @@ import Badge from '../../components/Badge'
 import Button from '../../components/Button'
 import { Input, Select } from '../../components/Input'
 import Pagination from '../../components/Pagination'
+import Modal from '../../components/Modal'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
 import { C, radius, shadow } from '../../theme'
@@ -283,6 +284,9 @@ function UploadSlot({ ft, fileInfo, result, uploading, isAdmin, onDrop, onUpload
                 {result.duplicate_count > 0 && (
                   <span style={{ fontWeight: 400, color: C.textMuted }}> · {result.duplicate_count} trùng bỏ qua</span>
                 )}
+                {result.rejected_count > 0 && (
+                  <span style={{ fontWeight: 400, color: C.error }}> · {result.rejected_count} dòng thiếu trường bắt buộc, không lưu</span>
+                )}
                 {result.error_count > 0 && (
                   <span style={{ fontWeight: 400, color: resultErr ? C.error : C.warning }}>
                     {' '}· {result.error_count} dòng có vấn đề
@@ -321,6 +325,7 @@ function HistoryTab({ dbTypes, onReloadTypes }) {
   const [debouncedSearch, setDSearch] = useState('')         // sent to server
   const [page, setPage]           = useState(1)
   const [pageSize, setPageSize]   = useState(20)
+  const [detailFile, setDetailFile] = useState(null)   // file row currently shown in the detail modal
 
   const typeColorMap = Object.fromEntries(dbTypes.map((t, i) => [t.id, PALETTE[i % PALETTE.length]]))
 
@@ -449,7 +454,11 @@ function HistoryTab({ dbTypes, onReloadTypes }) {
                         {r.status === 'ok' ? 'Hợp lệ' : 'Lỗi'}
                       </Badge>
                     </td>
-                    <td style={{ padding: '10px 14px' }}>
+                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => setDetailFile(r)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.primary, fontSize: 12, fontWeight: 600, marginRight: 10 }}
+                      >Xem chi tiết</button>
                       {isAdmin && (
                         <button
                           onClick={() => handleDeleteFile(r)}
@@ -477,7 +486,105 @@ function HistoryTab({ dbTypes, onReloadTypes }) {
           />
         )}
       </Card>
+
+      {detailFile && <RowLogModal file={detailFile} onClose={() => setDetailFile(null)} />}
     </div>
+  )
+}
+
+const ROW_LOG_STATUS_META = {
+  saved:     { label: 'Đã lưu',        color: C.success, bg: '#f0fdf4', border: '#bbf7d0' },
+  duplicate: { label: 'Trùng, bỏ qua', color: C.warning,  bg: '#fffbeb', border: '#fde68a' },
+  rejected:  { label: 'Thiếu dữ liệu, không lưu', color: C.error, bg: '#fef2f2', border: '#fecaca' },
+  blank:     { label: 'Dòng trống',    color: C.textLight, bg: C.neutralBg, border: C.cardBorder },
+}
+
+/* ── Row-level upload detail modal ────────────────────────────────────────────── */
+function RowLogModal({ file, onClose }) {
+  const [data, setData]         = useState(null)   // { rows, total, counts, available }
+  const [loading, setLoading]   = useState(true)
+  const [status, setStatus]     = useState('')
+  const [page, setPage]         = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+
+  useEffect(() => {
+    setLoading(true)
+    api.flex.getFileRowLog(file.id, { page, pageSize, status })
+      .then(setData)
+      .catch(() => setData({ rows: [], total: 0, counts: {}, available: false }))
+      .finally(() => setLoading(false))
+  }, [file.id, page, pageSize, status])
+
+  return (
+    <Modal open title={`Chi tiết từng dòng — ${file.original_name}`} onClose={onClose} width={720}>
+      {loading ? (
+        <div style={{ padding: '30px 0', textAlign: 'center', color: C.textMuted }}>Đang tải...</div>
+      ) : !data?.available ? (
+        <div style={{ padding: '30px 0', textAlign: 'center', color: C.textMuted, fontSize: 13 }}>
+          File này được tải lên trước khi có tính năng xem chi tiết từng dòng — không có dữ liệu để hiển thị.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+            {Object.entries(ROW_LOG_STATUS_META).map(([key, meta]) => {
+              const count = data.counts[key] || 0
+              if (count === 0) return null
+              const active = status === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => { setStatus(active ? '' : key); setPage(1) }}
+                  style={{
+                    fontSize: 12, padding: '4px 12px', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+                    background: meta.bg, color: meta.color, border: `1px solid ${active ? meta.color : meta.border}`,
+                    fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  {meta.label}: {count.toLocaleString()}
+                </button>
+              )
+            })}
+          </div>
+
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: C.neutralBg }}>
+                <th style={{ padding: '7px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, borderBottom: `1px solid ${C.cardBorder}` }}>Dòng Excel</th>
+                <th style={{ padding: '7px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, borderBottom: `1px solid ${C.cardBorder}` }}>Trạng thái</th>
+                <th style={{ padding: '7px 10px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.textMuted, borderBottom: `1px solid ${C.cardBorder}` }}>Lý do</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.length === 0 ? (
+                <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: C.textMuted }}>Không có dòng nào</td></tr>
+              ) : data.rows.map((r, i) => {
+                const meta = ROW_LOG_STATUS_META[r.status] || { label: r.status, color: C.textMuted, bg: C.neutralBg, border: C.cardBorder }
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                    <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: C.textMuted }}>{r.row}</td>
+                    <td style={{ padding: '6px 10px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: meta.bg, color: meta.color, border: `1px solid ${meta.border}` }}>
+                        {meta.label}
+                      </span>
+                    </td>
+                    <td style={{ padding: '6px 10px', color: C.textMuted, fontSize: 12 }}>{r.reason || '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          <Pagination
+            total={data.total}
+            page={page}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={setPageSize}
+            itemLabel="dòng"
+          />
+        </>
+      )}
+    </Modal>
   )
 }
 

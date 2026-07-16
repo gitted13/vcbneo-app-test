@@ -51,6 +51,8 @@ function dbToLocal(t) {
     type_code:   s.type_code || String(t.id),
     name:        t.upload_name,
     description: s.description || '',
+    source:      s.source    || '',   // 'Swift' | 'Core' | 'NAPAS' | '' (chưa gán)
+    direction:   s.direction || '',   // 'Đi' | 'Đến' | '' — không áp dụng cho Core (chia theo GHI NỢ/GHI CÓ từng dòng)
     unique_key:  s.unique_key  || [],
     columns: (s.columns || []).map(c => ({
       col_name:      c.col_name      || '',
@@ -69,6 +71,8 @@ function localToSchema(ft) {
   const schema = {
     type_code:   ft.type_code,
     description: ft.description,
+    source:      ft.source    || undefined,
+    direction:   ft.source === 'Core' ? undefined : (ft.direction || undefined),
     columns: ft.columns.map(c => {
       const col = { field_name: c.field_name, data_type: c.data_type, required: c.required, allowed_values: c.allowed_values, note: c.note || '' }
       if (c.transform) col.transform = c.transform
@@ -323,13 +327,33 @@ function TypeCard({ ft, expanded, isAdmin, onToggle, onMutate, onRemoveCol, onAd
 
       {expanded && (
         <div style={{ padding: '16px 20px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 12 }}>
             <FormRow label="Tên hiển thị">
               <Input value={ft.name} onChange={e => onMutate({ name: e.target.value })} />
             </FormRow>
             <FormRow label="Mô tả">
               <Input value={ft.description} onChange={e => onMutate({ description: e.target.value })} placeholder="Mô tả ngắn..." />
             </FormRow>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: ft.source === 'Core' ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 20 }}>
+            <FormRow label="Nguồn dữ liệu" hint="Dùng để Cấu hình đối chiếu và các trang tổng hợp biết loại file này thuộc hệ thống nào">
+              <Select value={ft.source} onChange={e => onMutate({ source: e.target.value })}>
+                <option value="">-- chưa gán --</option>
+                <option value="Swift">Swift</option>
+                <option value="Core">Core</option>
+                <option value="NAPAS">NAPAS</option>
+              </Select>
+            </FormRow>
+            {ft.source && ft.source !== 'Core' && (
+              <FormRow label="Chiều giao dịch" hint="Core không cần chọn — hệ thống tự phân theo cột SỐ TIỀN GHI NỢ/GHI CÓ của từng dòng">
+                <Select value={ft.direction} onChange={e => onMutate({ direction: e.target.value })}>
+                  <option value="">-- chưa gán --</option>
+                  <option value="Đi">Đi</option>
+                  <option value="Đến">Đến</option>
+                </Select>
+              </FormRow>
+            )}
           </div>
 
           <SectionLabel>Cột dữ liệu</SectionLabel>
