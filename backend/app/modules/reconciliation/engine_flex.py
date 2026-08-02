@@ -179,7 +179,7 @@ _FIELD_ALIASES: dict[str, list[str]] = {
     # abstract name → candidate field keys in merged_data (tried in order)
     # phản_hồi has human-readable status text (e.g. "THANH CONG", "TIMEOUT")
     "TT Swift":   ["phản_hồi", "tinh_trạng_phản_hồi"],
-    "TC/KTC":     ["phản_hồi", "tinh_trạng_phản_hồi"],
+    "TC/KTC":     ["napas_tc_ktc"],
     "Ngày GD":    ["thời_gian"],                    # Swift transaction datetime (M/D/YYYY h:mm:ss AM)
     "Ngày GN":    ["hostdate", "host_date"],         # Swift host/posting date (YYYYMMDD or YYYY-MM-DD)
     "Ngày NAPAS": ["ngày_gd"],                       # NAPAS date (MMDD or date string)
@@ -450,6 +450,19 @@ _KNOWN_BROKEN_RULE_FIXES: dict[tuple[str, str], list[list[dict]]] = {
     ("NAPAS_DI", "napas_di_2"): [[{"f": "TC/KTC", "op": "=", "v": "KTC"}]],
 }
 
+# SWIFT_DI ships with a 7th "Chỉ Swift" catch-all rule (Core=null) so rows
+# with no right-side match get that label instead of falling through
+# _classify()'s raw internal fallback string ("KHOP"/"CHI_TRAI" — not a
+# human label, never meant to reach the UI). An earlier legacy version of
+# SWIFT_DEN's seed shipped without this 7th rule — every unmatched Swift
+# Đến row has been displaying the literal internal code "CHI_TRAI" instead
+# of "Chỉ Swift" ever since (confirmed: 2432/6105 rows in a real local run).
+# Safe to auto-append: a MISSING rule was never a user choice to begin with.
+_MISSING_RULE_FIXES: dict[str, list[dict]] = {
+    "SWIFT_DEN": [{"id": "swift_den_6", "label": "Chỉ Swift", "color": "#dc2626",
+                    "groups": [[{"f": "Core", "op": "=", "v": "null"}]]}],
+}
+
 
 def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
     """Upgrade any old-format (bare chip-list) cond_key entries to the new
@@ -481,6 +494,11 @@ def migrate_status_rules(rules: dict) -> tuple[dict, bool]:
                 if groups != (rule.get("groups") or []):
                     rule = {**rule, "groups": groups}
                 rules_out.append(rule)
+            existing_ids = {r.get("id") for r in rules_out}
+            for missing_rule in _MISSING_RULE_FIXES.get(cond_key, []):
+                if missing_rule["id"] not in existing_ids:
+                    rules_out.append(missing_rule)
+                    changed = True
             out[cond_key] = rules_out
             continue
         # Old format: entries is a list of chip-lists

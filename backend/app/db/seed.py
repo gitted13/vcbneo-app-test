@@ -254,11 +254,18 @@ TYPES = [
                 {"col_name": "Phí chia sẻ rút tiền", "field_name": "phí_chia_sẻ_rút_tiền",  "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "Phí chia sẻ quẹt POS", "field_name": "phí_chia_sẻ_quẹt_pos", "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"field_name": "direction", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "đi"},
-                # Lets DateRules' "TC/KTC" condition (aliased to phản_hồi in
-                # engine_flex.py) tell real transactions apart from the
+                # Lets DateRules' "TC/KTC" condition (aliased to napas_tc_ktc
+                # in engine_flex.py) tell real transactions apart from the
                 # separate napas_di_ktc upload once both are unioned into the
                 # same NAPAS_DI reconcile dataset — see napas_di_ktc below.
-                {"field_name": "phản_hồi", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "TC"},
+                # Deliberately NOT named "phản_hồi": Swift's own schema
+                # already has a field with that exact name (its real TT
+                # status), and a Swift-vs-NAPAS join merges both sides into
+                # one dict — a colliding name here would silently overwrite
+                # Swift's real status with this fixed "TC" value and break
+                # every SWIFT_DI/DEN rule for that join (found & fixed after
+                # shipping this with "phản_hồi" — see agent-notes.md).
+                {"field_name": "napas_tc_ktc", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "TC"},
             ],
         },
     },
@@ -298,10 +305,11 @@ TYPES = [
                 {"field_name": "direction", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "đi"},
                 # Tagged source=NAPAS/direction=Đi (same as napas_di) so both
                 # union into the same NAPAS_DI reconcile dataset — this fixed
-                # phản_hồi="KTC" is what lets the seeded "Không thành công
-                # (KTC)" DateRules rule (TC/KTC = KTC) actually match these
-                # rows instead of never firing (see napas_di's phản_hồi="TC").
-                {"field_name": "phản_hồi", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "KTC"},
+                # napas_tc_ktc="KTC" is what lets the seeded "Không thành
+                # công (KTC)" DateRules rule (TC/KTC = KTC) actually match
+                # these rows instead of never firing (see napas_di's
+                # napas_tc_ktc="TC" — NOT named "phản_hồi", see comment there).
+                {"field_name": "napas_tc_ktc", "data_type": "string", "required": False, "allowed_values": [], "note": "", "fixed_value": "KTC"},
             ],
         },
     },
@@ -562,19 +570,30 @@ def migrate_type_source_direction():
 # napas_di_ktc (failed NAPAS transactions) and napas_di (real transactions)
 # now union into the same NAPAS_DI reconcile dataset via source/direction
 # tagging above — but DateRules' "Không thành công (KTC)" rule (TC/KTC=KTC)
-# can only tell them apart if each row carries a phản_hồi value. Existing
+# can only tell them apart if each row carries a napas_tc_ktc value. Existing
 # deployments predate this and won't have the column yet.
 _NAPAS_KTC_MARKER = {
     "napas_di":     "TC",
     "napas_di_ktc": "KTC",
 }
+_NAPAS_KTC_FIELD = "napas_tc_ktc"
+# A prior version of this migration used field_name "phản_hồi" — that
+# collides with Swift's own "phản_hồi" (its real TT status). merged =
+# {**left, **right} in run_flex_reconcile() lets the right side overwrite
+# colliding keys, so in a Swift-vs-NAPAS join this silently replaced Swift's
+# real status with NAPAS's fixed "TC"/"KTC" value, breaking every SWIFT_DI/
+# DEN rule for that join. Renamed to napas_tc_ktc (can't collide with
+# anything); the block below repairs any schema/rows already tagged with the
+# old broken name.
+_NAPAS_KTC_FIELD_OLD_BROKEN = "phản_hồi"
 
 
 def migrate_napas_ktc_marker():
-    """One-time, idempotent backfill: add a fixed_value phản_hồi column to
-    napas_di/napas_di_ktc if missing, so the KTC/TC DateRules condition has
-    something to match against. Never overwrites a phản_hồi column a user
-    already configured themselves.
+    """One-time, idempotent backfill: add a fixed_value napas_tc_ktc column
+    to napas_di/napas_di_ktc if missing, so the KTC/TC DateRules condition
+    has something to match against. Never overwrites a napas_tc_ktc column a
+    user already configured themselves. Also repairs any type/rows tagged by
+    the earlier, collision-prone "phản_hồi" version of this migration.
 
     fixed_value columns are baked into each row's file_data JSON at UPLOAD
     time, not read dynamically from the current schema — so adding the
@@ -596,21 +615,27 @@ def migrate_napas_ktc_marker():
                 if not marker:
                     continue
                 columns = schema.get("columns") or []
-                existing = next((c for c in columns if c.get("field_name") == "phản_hồi"), None)
-                if existing is None:
+                existing = next((c for c in columns if c.get("field_name") == _NAPAS_KTC_FIELD), None)
+                broken = next((c for c in columns if c.get("field_name") == _NAPAS_KTC_FIELD_OLD_BROKEN
+                               and c.get("fixed_value") == marker), None)
+                schema_changed = False
+                if existing is None and broken is not None:
+                    broken["field_name"] = _NAPAS_KTC_FIELD  # repair in place
+                    schema_changed = True
+                elif existing is None:
                     columns.append({
-                        "field_name": "phản_hồi", "data_type": "string", "required": False,
+                        "field_name": _NAPAS_KTC_FIELD, "data_type": "string", "required": False,
                         "allowed_values": [], "note": "", "fixed_value": marker,
                     })
                     schema["columns"] = columns
+                    schema_changed = True
+                if schema_changed:
                     cur.execute(
                         "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
                         json.dumps(schema, ensure_ascii=False), type_id,
                     )
                     updated_types += 1
-                    marked_type_ids.append((type_id, marker))
-                elif existing.get("fixed_value") == marker:
-                    marked_type_ids.append((type_id, marker))  # already tagged — still needs row backfill
+                marked_type_ids.append((type_id, marker))
 
             updated_rows = 0
             for type_id, marker in marked_type_ids:
@@ -627,15 +652,17 @@ def migrate_napas_ktc_marker():
                         data = json.loads(data_raw or "{}")
                     except (json.JSONDecodeError, TypeError):
                         continue
-                    if data.get("phản_hồi") == marker:
+                    if data.get(_NAPAS_KTC_FIELD) == marker and _NAPAS_KTC_FIELD_OLD_BROKEN not in data:
                         continue
-                    data["phản_hồi"] = marker
+                    if _NAPAS_KTC_FIELD_OLD_BROKEN in data:
+                        data.pop(_NAPAS_KTC_FIELD_OLD_BROKEN, None)
+                    data[_NAPAS_KTC_FIELD] = marker
                     cur.execute(
                         "UPDATE uploadedFileRows SET file_data = ? WHERE id = ?",
                         json.dumps(data, ensure_ascii=False), row_id,
                     )
                     updated_rows += 1
-        print(f"[migrate_napas_ktc_marker] OK ({updated_types} type(s), {updated_rows} row(s) backfilled)")
+        print(f"[migrate_napas_ktc_marker] OK ({updated_types} type(s), {updated_rows} row(s) backfilled/repaired)")
         if updated_types or updated_rows:
             clear_db_rows_cache()
     except Exception as exc:
