@@ -20,10 +20,11 @@ const TRANSFORM_TYPES = [
   { value: '',               label: 'Không có — đọc trực tiếp' },
   { value: 'math',           label: 'Công thức toán' },
   { value: 'regex_extract',  label: 'Xử lý string (Regex)' },
+  { value: 'dot_position',   label: 'Số cạnh dấu chấm (trước dấu . thứ 1 / sau dấu . thứ 2)' },
   { value: 'if_else',        label: 'Điều kiện (Nếu / Thì)' },
   { value: 'concat',         label: 'Ghép chuỗi' },
 ]
-const TRANSFORM_LABELS = { math: 'Toán', regex_extract: 'Regex', if_else: 'Điều kiện', concat: 'Ghép chuỗi' }
+const TRANSFORM_LABELS = { math: 'Toán', regex_extract: 'Regex', dot_position: 'Cạnh dấu chấm', if_else: 'Điều kiện', concat: 'Ghép chuỗi' }
 
 // Multiple columns can all read from the same source col_name (e.g. teller/
 // sequence/trace all extracted from one "DIỄN GIẢI" text cell via different
@@ -33,6 +34,7 @@ const TRANSFORM_LABELS = { math: 'Toán', regex_extract: 'Regex', if_else: 'Đi�
 function describeTransform(t) {
   if (!t?.type) return ''
   if (t.type === 'regex_extract') return `nhóm ${t.group ?? 0}: ${t.pattern || '(chưa có pattern)'}`
+  if (t.type === 'dot_position')  return `trước dấu . thứ 1, hoặc sau dấu . thứ 2`
   if (t.type === 'math')          return `${MATH_OPS.find(o => o.value === t.op)?.label || t.op} ${t.value ?? ''}`
   if (t.type === 'if_else')       return `nếu ${IF_OPS.find(o => o.value === t.op)?.label || t.op} "${t.cond_value ?? ''}" → "${t.then_value ?? ''}" : "${t.else_value ?? ''}"`
   if (t.type === 'concat')        return `ghép ${t.parts?.length || 0} phần`
@@ -66,7 +68,12 @@ function dbToLocal(t) {
     name:        t.upload_name,
     description: s.description || '',
     source:      s.source    || '',   // 'Swift' | 'Core' | 'NAPAS' | '' (chưa gán)
-    direction:   s.direction || '',   // 'Đi' | 'Đến' | '' — không áp dụng cho Core (chia theo GHI NỢ/GHI CÓ từng dòng)
+    direction:   s.direction || '',   // 'Đi' | 'Đến' | '' — không áp dụng cho Core (chia theo teller, xem teller_direction)
+    // Core-only: teller -> 'Đi'/'Đến'. Verified against real data — credit/
+    // debit (GHI CÓ/GHI NỢ) does NOT reliably indicate direction across all
+    // tellers (only true for some), so direction must be configured per
+    // teller instead of inferred from which amount column is populated.
+    teller_direction: s.teller_direction || {},
     unique_key:  s.unique_key  || [],
     columns: (s.columns || []).map(c => ({
       col_name:      c.col_name      || '',
@@ -87,6 +94,8 @@ function localToSchema(ft) {
     description: ft.description,
     source:      ft.source    || undefined,
     direction:   ft.source === 'Core' ? undefined : (ft.direction || undefined),
+    teller_direction: ft.source === 'Core' && Object.keys(ft.teller_direction || {}).length
+      ? ft.teller_direction : undefined,
     columns: ft.columns.map(c => {
       const col = { field_name: c.field_name, data_type: c.data_type, required: c.required, allowed_values: c.allowed_values, note: c.note || '' }
       if (c.transform) col.transform = c.transform
@@ -360,7 +369,7 @@ function TypeCard({ ft, expanded, isAdmin, onToggle, onMutate, onRemoveCol, onAd
               </Select>
             </FormRow>
             {ft.source && ft.source !== 'Core' && (
-              <FormRow label="Chiều giao dịch" hint="Core không cần chọn — hệ thống tự phân theo cột SỐ TIỀN GHI NỢ/GHI CÓ của từng dòng">
+              <FormRow label="Chiều giao dịch">
                 <Select value={ft.direction} onChange={e => onMutate({ direction: e.target.value })}>
                   <option value="">-- chưa gán --</option>
                   <option value="Đi">Đi</option>
@@ -369,6 +378,13 @@ function TypeCard({ ft, expanded, isAdmin, onToggle, onMutate, onRemoveCol, onAd
               </FormRow>
             )}
           </div>
+
+          {ft.source === 'Core' && (
+            <TellerDirectionEditor
+              value={ft.teller_direction || {}}
+              onChange={teller_direction => onMutate({ teller_direction })}
+            />
+          )}
 
           <SectionLabel>Cột dữ liệu</SectionLabel>
 
@@ -710,6 +726,7 @@ function TransformEditor({ value, onChange, fieldOptions }) {
     if (newType === type) return
     if (newType === 'math')          onChange({ type: 'math', op: 'multiply', value: '1' })
     else if (newType === 'regex_extract') onChange({ type: 'regex_extract', pattern: '', group: 0 })
+    else if (newType === 'dot_position') onChange({ type: 'dot_position' })
     else if (newType === 'if_else')  onChange({ type: 'if_else', op: 'contains', cond_value: '', then_value: '', else_value: '' })
     else if (newType === 'concat')   onChange({ type: 'concat', parts: [] })
   }
@@ -721,6 +738,7 @@ function TransformEditor({ value, onChange, fieldOptions }) {
       </Select>
       {type === 'math'          && <MathEditor   value={value} onChange={onChange} />}
       {type === 'regex_extract' && <RegexEditor  value={value} onChange={onChange} />}
+      {type === 'dot_position'  && <DotPositionEditor />}
       {type === 'if_else'       && <IfElseEditor value={value} onChange={onChange} />}
       {type === 'concat'        && <ConcatEditor value={value} onChange={onChange} fieldOptions={fieldOptions} />}
     </div>
@@ -814,6 +832,50 @@ function RegexEditor({ value, onChange }) {
       <div style={{ marginTop: 8, fontSize: 11, color: C.textMuted }}>
         <b>Nhóm 0</b> = toàn bộ phần khớp · <b>1, 2…</b> = nhóm trong dấu ngoặc <code>()</code>
       </div>
+    </div>
+  )
+}
+
+// Mirrors backend/app/modules/flex/router.py's "dot_position" transform
+// exactly — keep both in sync.
+function previewDotPosition(raw) {
+  const parts = String(raw ?? '').split('.')
+  if (parts.length >= 2) {
+    const m = parts[0].match(/(\d+)$/)
+    if (m) return { where: 'trước dấu . thứ 1', value: m[1] }
+  }
+  if (parts.length >= 3) {
+    const m = parts[2].match(/(\d+)/)
+    if (m) return { where: 'sau dấu . thứ 2', value: m[1] }
+  }
+  return null
+}
+
+function DotPositionEditor() {
+  const [testInput, setTestInput] = useState('')
+  const preview = useMemo(() => testInput ? previewDotPosition(testInput) : null, [testInput])
+
+  return (
+    <div style={{ marginTop: 8, padding: '12px', background: C.neutralBg, border: `1px solid ${C.cardBorder}`, borderRadius: 6 }}>
+      <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, lineHeight: 1.6 }}>
+        Không cần cấu hình gì thêm. Tự động thử theo thứ tự: lấy số ngay <b>trước dấu chấm thứ 1</b> nếu đoạn đó có số ở cuối
+        (VD: <code>G/L408896.010226.114608.</code> → <code>408896</code>); nếu đoạn trước dấu chấm thứ 1 toàn chữ (không có số),
+        lấy số <b>sau dấu chấm thứ 2</b> thay vào (VD: <code>CREDMBNEO.8165321.775741</code> → <code>775741</code>).
+      </div>
+      <div style={{ marginBottom: 6 }}>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>Thử nghiệm — dán giá trị mẫu từ file:</div>
+        <Input
+          value={testInput}
+          onChange={e => setTestInput(e.target.value)}
+          placeholder="VD: G/L408896.010226.114608."
+          style={{ fontFamily: 'monospace', fontSize: 11 }}
+        />
+      </div>
+      {testInput && (
+        <div style={{ padding: '6px 10px', background: preview ? '#f0fdf4' : '#fef2f2', border: `1px solid ${preview ? '#bbf7d0' : '#fecaca'}`, borderRadius: 4, fontSize: 12, fontFamily: 'monospace', color: preview ? '#166534' : '#dc2626' }}>
+          {preview ? `→ ${preview.value}  (${preview.where})` : '→ Không tìm thấy số phù hợp'}
+        </div>
+      )}
     </div>
   )
 }
@@ -1154,6 +1216,59 @@ function NewTypeModal({ open, onClose, onCreate }) {
         Sau khi tạo, dùng <b>"Quét file mẫu"</b> để tự động phát hiện các cột, hoặc <b>"+ Thêm cột thủ công"</b>.
       </div>
     </Modal>
+  )
+}
+
+// ── Teller → Chiều mapping (Core only) ──────────────────────────────────────
+// Credit/debit (GHI CÓ/GHI NỢ) does not reliably indicate Đi/Đến across all
+// tellers — verified against real data that some tellers use credit+debit as
+// two accounting legs of the same Đến transaction, not a direction signal.
+// So direction is configured per teller here instead of inferred per row.
+function TellerDirectionEditor({ value, onChange }) {
+  const entries = Object.entries(value)
+  const [newTeller, setNewTeller] = useState('')
+
+  const setDir = (teller, dir) => onChange({ ...value, [teller]: dir })
+  const remove = (teller) => {
+    const next = { ...value }
+    delete next[teller]
+    onChange(next)
+  }
+  const add = () => {
+    const t = newTeller.trim()
+    if (!t || value[t]) return
+    onChange({ ...value, [t]: 'Đi' })
+    setNewTeller('')
+  }
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <FormRow
+        label="Chiều giao dịch theo teller"
+        hint="Core không có 1 cột chiều duy nhất — GHI CÓ/GHI NỢ có thể không phản ánh đúng Đi/Đến tùy teller. Gán trực tiếp từng mã teller vào Đi hoặc Đến."
+      >
+        <div style={{ border: `1px solid ${C.cardBorder}`, borderRadius: radius.md, overflow: 'hidden' }}>
+          {entries.length === 0 ? (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: C.textLight, fontStyle: 'italic' }}>
+              Chưa gán teller nào — dòng của các teller chưa gán sẽ không thuộc Đi hay Đến, bị bỏ qua khi đối soát.
+            </div>
+          ) : entries.map(([teller, dir]) => (
+            <div key={teller} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderBottom: `1px solid ${C.cardBorder}` }}>
+              <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600, flex: 1 }}>{teller}</span>
+              <Select value={dir} onChange={e => setDir(teller, e.target.value)} style={{ width: 110 }}>
+                <option value="Đi">Đi</option>
+                <option value="Đến">Đến</option>
+              </Select>
+              <button onClick={() => remove(teller)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textLight, fontSize: 16, lineHeight: 1, padding: '0 4px' }}>×</button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 8, padding: '8px 10px', background: C.neutralBg }}>
+            <Input value={newTeller} onChange={e => setNewTeller(e.target.value)} placeholder="Mã teller, VD: 5071" style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }} />
+            <Button size="sm" variant="secondary" onClick={add}>+ Thêm teller</Button>
+          </div>
+        </div>
+      </FormRow>
+    </div>
   )
 }
 

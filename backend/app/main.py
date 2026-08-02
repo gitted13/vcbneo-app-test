@@ -6,7 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api.v1.router import api_router
-from app.db.seed import seed_flex, init_reconcile_tables, seed_reconcile_configs, migrate_type_source_direction, migrate_napas_ktc_marker
+from app.db.seed import (
+    seed_flex, init_reconcile_tables, seed_reconcile_configs,
+    migrate_type_source_direction, migrate_napas_ktc_marker,
+    migrate_swift_id_fields_to_string, migrate_core_teller_rules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,8 @@ async def lifespan(app: FastAPI):
     seed_flex()
     migrate_type_source_direction()
     migrate_napas_ktc_marker()
+    migrate_swift_id_fields_to_string()
+    migrate_core_teller_rules()
     seed_reconcile_configs()
     yield
 

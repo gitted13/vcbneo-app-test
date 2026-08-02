@@ -168,13 +168,13 @@ TYPES = [
                 {"col_name": "NGÂN HÀNG NHẬN",    "field_name": "ngân_hàng_nhận",     "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "TK/THẺ NHẬN",       "field_name": "tk/thẻ_nhận",        "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "TÊN NGƯỜI HƯỞNG",   "field_name": "tên_người_hưởng",    "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
-                {"col_name": "TRACE NUMBER",       "field_name": "trace_number",       "data_type": "integer", "required": True,  "allowed_values": [], "note": ""},
+                {"col_name": "TRACE NUMBER",       "field_name": "trace_number",       "data_type": "string",  "required": True,  "allowed_values": [], "note": ""},
                 {"col_name": "SỐ TIỀN",            "field_name": "số_tiền",            "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "SỐ TIỀN PHÍ",       "field_name": "số_tiền_phí",        "data_type": "number",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "NÔI DUNG GD",        "field_name": "nôi_dung_gd",        "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "NGUỒN",              "field_name": "nguồn",              "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
-                {"col_name": "TELLER",             "field_name": "teller",             "data_type": "integer", "required": False, "allowed_values": [], "note": ""},
-                {"col_name": "SEQ",                "field_name": "seq",                "data_type": "integer", "required": True,  "allowed_values": [], "note": ""},
+                {"col_name": "TELLER",             "field_name": "teller",             "data_type": "string",  "required": False, "allowed_values": [], "note": ""},
+                {"col_name": "SEQ",                "field_name": "seq",                "data_type": "string",  "required": True,  "allowed_values": [], "note": ""},
                 {"col_name": "PCTIME",             "field_name": "pctime",             "data_type": "date",    "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "HOSTDATE",           "field_name": "hostdate",           "data_type": "date",    "required": True,  "allowed_values": [], "note": ""},
                 {"col_name": "TINH TRẠNG PHẢN HỒI","field_name": "tinh_trạng_phản_hồi","data_type": "integer","required": False, "allowed_values": [], "note": ""},
@@ -202,9 +202,9 @@ TYPES = [
                 {"col_name": "SỐ TIỀN",            "field_name": "số_tiền",            "data_type": "number",   "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "NÔI DUNG GD",        "field_name": "nôi_dung_gd",        "data_type": "string",   "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "HOST DATE",          "field_name": "host_date",          "data_type": "date",     "required": True,  "allowed_values": [], "note": ""},
-                {"col_name": "TRACE",              "field_name": "trace",              "data_type": "integer",  "required": True,  "allowed_values": [], "note": ""},
-                {"col_name": "TELLER",             "field_name": "teller",             "data_type": "integer",  "required": False, "allowed_values": [], "note": ""},
-                {"col_name": "SEQ",                "field_name": "seq",                "data_type": "integer",  "required": True,  "allowed_values": [], "note": ""},
+                {"col_name": "TRACE",              "field_name": "trace",              "data_type": "string",   "required": True,  "allowed_values": [], "note": ""},
+                {"col_name": "TELLER",             "field_name": "teller",             "data_type": "string",   "required": False, "allowed_values": [], "note": ""},
+                {"col_name": "SEQ",                "field_name": "seq",                "data_type": "string",   "required": True,  "allowed_values": [], "note": ""},
                 {"col_name": "PCTIME",             "field_name": "pctime",             "data_type": "date",     "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "TINH TRẠNG PHẢN HỒI","field_name": "tinh_trạng_phản_hồi","data_type": "integer", "required": False, "allowed_values": [], "note": ""},
                 {"col_name": "PHẢN HỒI",           "field_name": "phản_hồi",           "data_type": "string",   "required": False, "allowed_values": [], "note": ""},
@@ -667,6 +667,168 @@ def migrate_napas_ktc_marker():
             clear_db_rows_cache()
     except Exception as exc:
         print(f"[migrate_napas_ktc_marker] error: {exc}")
+
+
+# Swift's teller/seq/trace_number(trace) were seeded as data_type="integer" —
+# harmless on its own (the join key normalizer already casts numeric-looking
+# values consistently), but Core's matching versions of these same fields are
+# string (regex-extracted text can't be an int), and any code comparing them
+# directly (not through the join normalizer) breaks silently on the type
+# mismatch. Normalizing both sides to string removes the whole class of bug.
+_SWIFT_ID_FIELDS = {"swift_di": ("teller", "seq", "trace_number"), "swift_den": ("teller", "seq", "trace")}
+
+
+def migrate_swift_id_fields_to_string():
+    """One-time, idempotent: set teller/seq/trace(_number) columns to
+    data_type="string" on swift_di/swift_den, and re-stringify already-
+    uploaded rows' values for those fields (data_type only affects parsing
+    of NEW uploads, so existing rows keep their JSON-number values otherwise)."""
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id, fields_schema FROM uploadedTypes WHERE is_active = 1")
+            type_rows = cur.fetchall()
+            updated_types = 0
+            touched_type_ids: list[tuple[int, tuple]] = []
+            for type_id, schema_raw in type_rows:
+                try:
+                    schema = json.loads(schema_raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                fields = _SWIFT_ID_FIELDS.get(schema.get("type_code"))
+                if not fields:
+                    continue
+                columns = schema.get("columns") or []
+                changed = False
+                for c in columns:
+                    if c.get("field_name") in fields and c.get("data_type") != "string":
+                        c["data_type"] = "string"
+                        changed = True
+                if changed:
+                    cur.execute(
+                        "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
+                        json.dumps(schema, ensure_ascii=False), type_id,
+                    )
+                    updated_types += 1
+                touched_type_ids.append((type_id, fields))
+
+            updated_rows = 0
+            for type_id, fields in touched_type_ids:
+                cur.execute(
+                    """
+                    SELECT r.id, r.file_data FROM uploadedFileRows r
+                    JOIN uploadedFiles f ON f.id = r.upload_file_id
+                    WHERE f.upload_type_id = ?
+                    """,
+                    type_id,
+                )
+                for row_id, data_raw in cur.fetchall():
+                    try:
+                        data = json.loads(data_raw or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    row_changed = False
+                    for field in fields:
+                        v = data.get(field)
+                        if v is not None and not isinstance(v, str):
+                            data[field] = str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+                            row_changed = True
+                    if row_changed:
+                        cur.execute(
+                            "UPDATE uploadedFileRows SET file_data = ? WHERE id = ?",
+                            json.dumps(data, ensure_ascii=False), row_id,
+                        )
+                        updated_rows += 1
+        print(f"[migrate_swift_id_fields_to_string] OK ({updated_types} type(s), {updated_rows} row(s) restringified)")
+        if updated_types or updated_rows:
+            clear_db_rows_cache()
+    except Exception as exc:
+        print(f"[migrate_swift_id_fields_to_string] error: {exc}")
+
+
+# ABSOLUTE RULE (verified against real data, see docs/agent-notes.md):
+# Core direction is teller-based, not credit/debit-based — teller 5071 is
+# always Đi, tellers 5219/5220 are always Đến (both their credit AND debit
+# rows). Also: Core's "trace" field must be extracted by dot-position
+# ("dot_position" transform — before the 1st dot if that segment has
+# trailing digits, else after the 2nd dot), not the old single CREDMBNEO-
+# only regex, which silently extracted a timestamp instead of a trace
+# number for the 5219/5220 narrative format (confirmed: this alone took the
+# Core-Đến/NAPAS-Đến match rate from 0% to ~91-99%).
+_CORE_TELLER_DIRECTION_DEFAULT = {"5071": "Đi", "5219": "Đến", "5220": "Đến"}
+_CORE_OLD_TRACE_TRANSFORM_PATTERN = "^[^.]+\\.[^.]+\\.(\\d+)"  # the collision-prone CREDMBNEO-only regex
+
+
+def migrate_core_teller_rules():
+    """One-time, idempotent: (1) set every Core-sourced type's trace column
+    to the dot_position transform if it's still using the old CREDMBNEO-only
+    regex, and re-derive already-uploaded rows' trace field with it;
+    (2) apply the default teller_direction map if the type has none
+    configured yet (never overwrites a non-empty map — that's a real user
+    setting once someone has touched it)."""
+    from app.modules.flex.router import _apply_transform  # local import: avoids import-order coupling at module load
+
+    try:
+        with db_cursor() as cur:
+            cur.execute("SELECT id, fields_schema FROM uploadedTypes WHERE is_active = 1")
+            type_rows = cur.fetchall()
+            updated_types = 0
+            core_type_ids: list[int] = []
+            for type_id, schema_raw in type_rows:
+                try:
+                    schema = json.loads(schema_raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if schema.get("source") != "Core":
+                    continue
+                core_type_ids.append(type_id)
+                schema_changed = False
+
+                trace_col = next((c for c in (schema.get("columns") or []) if c.get("field_name") == "trace"), None)
+                if trace_col and (trace_col.get("transform") or {}).get("pattern") == _CORE_OLD_TRACE_TRANSFORM_PATTERN:
+                    trace_col["transform"] = {"type": "dot_position"}
+                    schema_changed = True
+
+                if not schema.get("teller_direction"):
+                    schema["teller_direction"] = dict(_CORE_TELLER_DIRECTION_DEFAULT)
+                    schema_changed = True
+
+                if schema_changed:
+                    cur.execute(
+                        "UPDATE uploadedTypes SET fields_schema = ? WHERE id = ?",
+                        json.dumps(schema, ensure_ascii=False), type_id,
+                    )
+                    updated_types += 1
+
+            updated_rows = 0
+            for type_id in core_type_ids:
+                cur.execute(
+                    """
+                    SELECT r.id, r.file_data FROM uploadedFileRows r
+                    JOIN uploadedFiles f ON f.id = r.upload_file_id
+                    WHERE f.upload_type_id = ?
+                    """,
+                    type_id,
+                )
+                for row_id, data_raw in cur.fetchall():
+                    try:
+                        data = json.loads(data_raw or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if "diễn_giải" not in data:
+                        continue
+                    new_trace = _apply_transform(data.get("diễn_giải"), {"type": "dot_position"})
+                    if new_trace and new_trace != data.get("trace"):
+                        data["trace"] = new_trace
+                        cur.execute(
+                            "UPDATE uploadedFileRows SET file_data = ? WHERE id = ?",
+                            json.dumps(data, ensure_ascii=False), row_id,
+                        )
+                        updated_rows += 1
+        print(f"[migrate_core_teller_rules] OK ({updated_types} type(s), {updated_rows} row(s) re-extracted)")
+        if updated_types or updated_rows:
+            clear_db_rows_cache()
+    except Exception as exc:
+        print(f"[migrate_core_teller_rules] error: {exc}")
 
 
 def seed_reconcile_configs():

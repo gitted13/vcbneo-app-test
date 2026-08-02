@@ -11,6 +11,7 @@ Flow:
 
 import datetime
 import json
+import re
 import unicodedata
 from typing import Any, Callable
 
@@ -27,15 +28,50 @@ from app.db.connection import db_cursor
 # docs/agent-notes.md for the incident this replaced.
 #
 # Core is intentionally NOT tagged with a direction: Core GL entries are
-# split into Đi/Đến per ROW (whichever of số_tiền_ghi_có/số_tiền_ghi_nợ is
-# populated), not per upload — so ALL types tagged source="Core" (whether
-# that's one combined upload or several split by teller/batch) are unioned
-# together first, then filtered by row content. Confirmed from data: ghi_có
-# entries are Đi-direction, ghi_nợ entries are Đến-direction.
-_CORE_ROW_FILTER: dict[str, Callable[[dict], bool]] = {
-    "Đi":  lambda d: bool(d.get("số_tiền_ghi_có")),
-    "Đến": lambda d: bool(d.get("số_tiền_ghi_nợ")),
-}
+# split into Đi/Đến per ROW, not per upload — so ALL types tagged
+# source="Core" (whether that's one combined upload or several split by
+# teller/batch) are unioned together first, then filtered by row content.
+#
+# ABSOLUTE RULE (verified against real data — see docs/agent-notes.md for
+# the investigation): direction is determined by TELLER, not by which of
+# số_tiền_ghi_có/số_tiền_ghi_nợ is populated. Credit/debit does NOT mean
+# Đi/Đến uniformly across tellers — confirmed teller 5071's credit rows are
+# 99%+ Đi (matches both Swift-Đi and NAPAS-Đi by trace/sequence), while
+# teller 5219/5220's rows — credit AND debit BOTH — are 99-100% Đến (both
+# sides independently match Swift-Đến/NAPAS-Đến). Likely two accounting
+# legs of the same incoming transfer for that teller group, not a
+# direction signal at all.
+#
+# This mapping is real per-type CONFIG (fields_schema.teller_direction),
+# not a hardcoded Python dict — so it can be edited without a code change
+# as tellers are added/reclassified. A teller absent from the map matches
+# neither direction (excluded, not guessed) until someone configures it.
+def _get_teller_direction_map(type_id: int) -> dict[str, str]:
+    cached = _teller_direction_cache.get(type_id)
+    if cached is not None:
+        return cached
+    with db_cursor() as cur:
+        cur.execute("SELECT fields_schema FROM uploadedTypes WHERE id = ?", type_id)
+        row = cur.fetchone()
+    try:
+        schema = json.loads(row[0]) if row else {}
+    except (json.JSONDecodeError, TypeError):
+        schema = {}
+    mapping = {str(k): v for k, v in (schema.get("teller_direction") or {}).items()}
+    _teller_direction_cache[type_id] = mapping
+    return mapping
+
+
+_teller_direction_cache: dict[int, dict[str, str]] = {}
+
+
+def _core_teller_direction_filter(type_id: int, direction: str) -> Callable[[dict], bool]:
+    mapping = _get_teller_direction_map(type_id)
+
+    def _filter(d: dict) -> bool:
+        return mapping.get(str(d.get("teller"))) == direction
+
+    return _filter
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -118,9 +154,9 @@ def _resolve_and_load(source: str, direction: str) -> tuple[int | None, list[dic
     type_ids = resolve_type_ids("Core", None) if source == "Core" else resolve_type_ids(source, direction)
     if not type_ids:
         return None, []
-    row_filter = _CORE_ROW_FILTER.get(direction) if source == "Core" else None
     rows: list[dict] = []
     for tid in type_ids:
+        row_filter = _core_teller_direction_filter(tid, direction) if source == "Core" else None
         rows.extend(_load_rows(tid, row_filter))
     return type_ids[0], rows
 
@@ -227,6 +263,57 @@ def _to_date_str(v: str) -> str:
     return s
 
 
+_MMDD_RE = re.compile(r"^\d{4}$")
+_YMD_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def _normalize_date_pair(a_raw: str, b_raw: str) -> tuple[str, str]:
+    """Normalize two date-comparison operands together, so a bare "MMDD"
+    (NAPAS's ngày_gd — no year in the source file at all) can borrow a year
+    from the other side instead of being compared as a raw string.
+
+    _to_date_str() alone can't do this — it has no year-handling for 4-digit
+    input, so "0201" was passed through UNCHANGED and string-compared
+    against a real "2026-02-01". Since MMDD always starts with '0'/'1'
+    (month) and a real year always starts with '2' (20xx), that comparison
+    was GUARANTEED to register "earlier" for every single row, regardless
+    of the actual calendar dates — not a rare edge case, a structural bug.
+    Confirmed against real NAPAS-vs-Core data: of 6,962 matched rows, the
+    true split is 6,940 same-day / 22 T+1 / 0 T-1 — but the un-fixed string
+    comparison classified all 6,962 as T-1.
+
+    Year is inferred by trying year-1/year/year+1 against the fully-dated
+    side and keeping whichever gives the smallest day gap (handles a
+    Dec/Jan pair spanning a year boundary correctly)."""
+    a = _to_date_str(a_raw)
+    b = _to_date_str(b_raw)
+    a_bare, b_ymd = _MMDD_RE.match(a), _YMD_RE.match(b)
+    b_bare, a_ymd = _MMDD_RE.match(b), _YMD_RE.match(a)
+    if a_bare and b_ymd:
+        a = _infer_mmdd_year(a, b) or a
+    elif b_bare and a_ymd:
+        b = _infer_mmdd_year(b, a) or b
+    return a, b
+
+
+def _infer_mmdd_year(mmdd: str, reference_ymd: str) -> str | None:
+    m = _YMD_RE.match(reference_ymd)
+    if not m:
+        return None
+    ref = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    mm, dd = mmdd[:2], mmdd[2:]
+    best, best_gap = None, None
+    for y in (ref.year - 1, ref.year, ref.year + 1):
+        try:
+            cand = datetime.date(y, int(mm), int(dd))
+        except ValueError:
+            continue
+        gap = abs((ref - cand).days)
+        if best_gap is None or gap < best_gap:
+            best, best_gap = cand, gap
+    return best.isoformat() if best else None
+
+
 def _resolve_field(f: str, merged: dict) -> str:
     """Resolve abstract field name to value string in merged_data."""
     if f in merged and merged[f] is not None:
@@ -263,10 +350,11 @@ def _eval_chip(chip: dict, merged: dict, left_data: dict, right_data: dict | Non
     actual_str = _resolve_field(f, merged)
 
     if _is_date_field(val) or _is_date_field(f):
-        # Date comparison: normalize both to YYYY-MM-DD
-        a = _to_date_str(actual_str)
+        # Date comparison: normalize both to YYYY-MM-DD together (see
+        # _normalize_date_pair — a bare MMDD side needs the other side's
+        # year, can't be normalized in isolation).
         b_raw = _resolve_field(val, merged) if _is_date_field(val) else val
-        b = _to_date_str(b_raw)
+        a, b = _normalize_date_pair(actual_str, b_raw)
     else:
         # Diacritic/case-insensitive comparison for status values — DateRules'
         # suggestion dropdown offers accented text ("Thành công") while raw
@@ -719,6 +807,7 @@ def clear_type_id_cache() -> None:
     doesn't change just because a new file was added for it."""
     _type_id_cache.clear()
     _source_resolve_cache.clear()
+    _teller_direction_cache.clear()
 
 
 def mark_stale_by_type(type_id: int) -> None:

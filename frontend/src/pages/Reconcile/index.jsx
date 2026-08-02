@@ -7,6 +7,7 @@ import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
 import { useApp } from '../../context/AppContext'
 import { useAuth } from '../../context/AuthContext'
+import { formatDate } from '../../utils/date'
 
 /* ── Status display map ───────────────────────────────────────────────────── */
 const STATUS_META = {
@@ -60,28 +61,28 @@ function statusMeta(code) {
 /* ── Column definitions per config ───────────────────────────────────────── */
 const CONFIG_COLS = {
   1: {
-    left:  [{ k: 'trace_number', l: 'Trace Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'hostdate', l: 'Ngày GN' }],
-    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'ngày_gd', l: 'Ngày NAPAS' }],
+    left:  [{ k: 'trace_number', l: 'Trace Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'hostdate', l: 'Ngày GN', fmt: 'date' }],
+    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'ngày_gd', l: 'Ngày NAPAS', fmt: 'date' }],
   },
   2: {
-    left:  [{ k: 'trace', l: 'Trace Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'host_date', l: 'Ngày GN' }],
-    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'ngày_gd', l: 'Ngày NAPAS' }],
+    left:  [{ k: 'trace', l: 'Trace Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'host_date', l: 'Ngày GN', fmt: 'date' }],
+    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'ngày_gd', l: 'Ngày NAPAS', fmt: 'date' }],
   },
   3: {
-    left:  [{ k: 'seq', l: 'Seq Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'hostdate', l: 'Ngày GN' }],
-    right: [{ k: 'sequence', l: 'Seq Core' }, { k: 'số_tiền_ghi_nợ', l: 'Ghi nợ', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core' }],
+    left:  [{ k: 'seq', l: 'Seq Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'hostdate', l: 'Ngày GN', fmt: 'date' }],
+    right: [{ k: 'sequence', l: 'Seq Core' }, { k: 'số_tiền_ghi_nợ', l: 'Ghi nợ', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core', fmt: 'date' }],
   },
   4: {
-    left:  [{ k: 'seq', l: 'Seq Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'host_date', l: 'Ngày GN' }],
-    right: [{ k: 'sequence', l: 'Seq Core' }, { k: 'số_tiền_ghi_có', l: 'Ghi có', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core' }],
+    left:  [{ k: 'seq', l: 'Seq Swift' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'tinh_trạng_phản_hồi', l: 'TT Swift' }, { k: 'host_date', l: 'Ngày GN', fmt: 'date' }],
+    right: [{ k: 'sequence', l: 'Seq Core' }, { k: 'số_tiền_ghi_có', l: 'Ghi có', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core', fmt: 'date' }],
   },
   5: {
-    left:  [{ k: 'trace', l: 'Trace Core' }, { k: 'số_tiền_ghi_nợ', l: 'Ghi nợ', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core' }],
-    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'ngày_gd', l: 'Ngày NAPAS' }],
+    left:  [{ k: 'trace', l: 'Trace Core' }, { k: 'sequence', l: 'Sequence' }, { k: 'số_tiền_ghi_nợ', l: 'Ghi nợ', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core', fmt: 'date' }],
+    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'ngày_gd', l: 'Ngày NAPAS', fmt: 'date' }],
   },
   6: {
-    left:  [{ k: 'trace', l: 'Trace Core' }, { k: 'số_tiền_ghi_có', l: 'Ghi có', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core' }],
-    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'ngày_gd', l: 'Ngày NAPAS' }],
+    left:  [{ k: 'trace', l: 'Trace Core' }, { k: 'sequence', l: 'Sequence' }, { k: 'số_tiền_ghi_có', l: 'Ghi có', fmt: 'amt' }, { k: 'ngày_giao_dịch', l: 'Ngày Core', fmt: 'date' }],
+    right: [{ k: 'số_trace', l: 'Trace NAPAS' }, { k: 'số_tiền', l: 'Số tiền', fmt: 'amt' }, { k: 'ngày_gd', l: 'Ngày NAPAS', fmt: 'date' }],
   },
 }
 
@@ -103,7 +104,9 @@ const fmtAmt = v => {
 const fmtCell = (col, data) => {
   const v = data?.[col.k]
   if (v === undefined || v === null || v === '') return '—'
-  return col.fmt === 'amt' ? fmtAmt(v) : String(v)
+  if (col.fmt === 'amt')  return fmtAmt(v)
+  if (col.fmt === 'date') return formatDate(v)
+  return String(v)
 }
 
 /* ── StatusBadge ──────────────────────────────────────────────────────────── */

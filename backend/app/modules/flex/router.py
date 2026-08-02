@@ -609,6 +609,30 @@ def _apply_transform(raw: Any, transform: dict, row_ctx: dict | None = None) -> 
         else:
             return else_val if else_val else raw
 
+    if t == "dot_position":
+        # Extracts a trace-like number from text where its position relative
+        # to "." varies by narrative format (confirmed against real Core
+        # Banking data: teller 5071's format has it after the 2nd dot,
+        # teller 5219/5220's format has it right before the 1st dot) — checks
+        # BEFORE the 1st dot first (only succeeds if that segment actually
+        # ends in digits, e.g. "G/L408896" -> "408896"; a pure-letters
+        # segment like "CREDMBNEO" has no trailing digit run and falls
+        # through), then AFTER the 2nd dot. General/format-agnostic by
+        # design — doesn't hardcode "CREDMBNEO" or "G/L" as literal text, so
+        # it keeps working if a narrative prefix changes or a new teller
+        # appears using either of these two layouts.
+        s = str(raw) if raw is not None else ""
+        parts = s.split(".")
+        if len(parts) >= 2:
+            m = re.search(r"(\d+)$", parts[0])
+            if m:
+                return m.group(1)
+        if len(parts) >= 3:
+            m = re.search(r"(\d+)", parts[2])
+            if m:
+                return m.group(1)
+        return None
+
     if t == "concat":
         ctx    = row_ctx or {}
         result = []

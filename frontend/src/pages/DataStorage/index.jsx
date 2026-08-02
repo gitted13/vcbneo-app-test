@@ -6,6 +6,7 @@ import { Input, Select } from '../../components/Input'
 import Pagination from '../../components/Pagination'
 import { C, radius, shadow } from '../../theme'
 import { api } from '../../api/client'
+import { formatDate } from '../../utils/date'
 
 const PALETTE = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#64748b', '#0891b2', '#be185d']
 
@@ -41,38 +42,6 @@ function formatTime(val) {
 
 function isStatusCol(col) {
   return Array.isArray(col.allowed_values) && col.allowed_values.length > 0
-}
-
-// Parses every raw date shape actually seen across the 6 file types into
-// {y, mo, d, h?, mi?, se?}. NAPAS ships "Ngày GD" as MMDD/MDD with no year
-// (e.g. "0203") — assumed to be the current year, same convention already
-// used by the date-range filter below.
-function parseFlexDate(val) {
-  const s = String(val ?? '').trim()
-  if (!s) return null
-  let m
-  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)))
-    return { y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5], se: +m[6] }
-  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/)))
-    return { y: +m[1], mo: +m[2], d: +m[3] }
-  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)))
-    return { y: +m[1], mo: +m[2], d: +m[3] }
-  if ((m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)))
-    return { y: +m[3], mo: +m[2], d: +m[1] }
-  if (/^\d{3,4}$/.test(s)) {
-    const padded = s.padStart(4, '0')
-    return { y: new Date().getFullYear(), mo: +padded.slice(0, 2), d: +padded.slice(2, 4) }
-  }
-  return null
-}
-
-function formatDate(val) {
-  const p = parseFlexDate(val)
-  if (!p) return String(val ?? '')
-  const dd = String(p.d).padStart(2, '0'), mm = String(p.mo).padStart(2, '0')
-  let out = `${dd}/${mm}/${p.y}`
-  if (p.h != null) out += ` ${String(p.h).padStart(2, '0')}:${String(p.mi).padStart(2, '0')}:${String(p.se).padStart(2, '0')}`
-  return out
 }
 
 function StatusChip({ value }) {
