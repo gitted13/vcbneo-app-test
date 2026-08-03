@@ -104,6 +104,30 @@ export default function NapasCore() {
     await downloadDetailXlsx({ title: 'ĐỐI CHIẾU NAPAS – CORE GL', dir, filterFrom, filterTo, headers, rows, headerBg: '#92400e', filename: `NAPAS_Core_${dir}_${date}` })
   }
 
+  /* NAPAS xác nhận TC nhưng Core chưa ghi nhận — gộp cả 2 chiều vào 1 file:
+     Đi = tiền đã đi nhưng Core chưa trừ → cần hoàn trả; Đến = tiền đã về
+     nhưng Core chưa ghi có → cần báo có cho KH. Yêu cầu khách hàng. */
+  const handleExportRefundReport = async () => {
+    const pending = rows.filter(r => {
+      if (!r.napas || r.napas.failed || r.core) return false
+      const d = r.napas.date
+      if (filterFrom && d && dayToISO(d) < filterFrom) return false
+      if (filterTo   && d && dayToISO(d) > filterTo)   return false
+      return true
+    })
+    const headers = ['Ngày NAPAS', 'Trace', 'Sequence', 'Chiều', 'Số tiền (VNĐ)', 'Loại (GD/QT)', 'Hành động']
+    const rowsOut = pending.map(r => [
+      r.napas.date, r.trace, r.sequence ?? '', r.direction, r.amount, r.napas.type,
+      r.direction === 'Đi' ? 'Cần hoàn trả' : 'Cần báo có cho KH',
+    ])
+    const date = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')
+    await downloadDetailXlsx({
+      title: 'GD NAPAS TC – CHƯA GHI NHẬN Ở CORE (CẦN HOÀN TRẢ / BÁO CÓ KH)',
+      dir: 'Đi + Đến', filterFrom, filterTo, headers, rows: rowsOut,
+      headerBg: '#b91c1c', filename: `NAPAS_CanHoanTra_BaoCo_${date}`,
+    })
+  }
+
   if (loading) return <PageShell title="Đối chiếu NAPAS với Core GL"><div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>Đang tải dữ liệu...</div></PageShell>
 
   return (
@@ -142,6 +166,7 @@ export default function NapasCore() {
             ))}
           </Select>
           <Button size="sm" variant="subtle" onClick={handleExport}>↓ Xuất Excel</Button>
+          <Button size="sm" variant="subtle" onClick={handleExportRefundReport} title="NAPAS đã báo TC nhưng Core chưa ghi nhận — gộp cả Đi và Đến, không lọc theo chiều đang xem">↓ GD cần hoàn trả / báo có KH</Button>
         </div>
 
         <div style={{ overflowX: 'auto' }}>
