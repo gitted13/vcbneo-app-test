@@ -66,10 +66,11 @@ const isRealTMinus1 = r => !!r.swift?.txnDate && !!r.swift?.date && ymd(r.swift.
    • NAPAS không có timeout — chỉ TC (failed=false) và KTC (failed=true)   ──── */
 
 /* Swift ↔ Core chiều Đi — TC/TO × T/T+1 + Thất bại + Chỉ Swift (THANH_CONG không có Core)
-   "Chỉ Swift" trước đây gộp chung 2 trường hợp khác nhau (CHI_SWIFT thật sự
-   không có gì + NAPAS_THAT_BAI báo KTC) vào 1 nhãn — theo yêu cầu khách hàng
-   tách riêng TC/KTC, giờ là 2 dòng độc lập dùng đúng recon_status backend
-   đã tính sẵn (xem RECON_STATUS_META ở trên).
+   "Chỉ Swift" từng bị tách theo NAPAS TC/KTC (4 nhãn phụ) nhưng trang
+   SwiftCore chỉ hiển thị cột Swift + Core, không có cột NAPAS nào — badge
+   nhắc tới NAPAS mà không có dữ liệu NAPAS đối chứng trên màn hình gây
+   hiểu lầm là lỗi. Gộp lại thành 1 nhãn chung, không nhắc NAPAS ở trang
+   này nữa (khách hàng xác nhận trực tiếp trên UI thật tháng 8/2026).
    T = ngày GD thực tế (txnDate); T+1 = Core ghi nhận ngày tiếp theo (isT1) */
 export const SWIFT_COLS_DI = [
   { label: 'Thành công – Core ngày T',    color:'#059669', bg:'#f0fdf4', border:'#bbf7d0', filterFn: r => !!r.swift && r.swift.status === 'THANH_CONG' && !isT1(r) && !!r.core },
@@ -78,11 +79,7 @@ export const SWIFT_COLS_DI = [
   { label: 'Timeout – Core ngày T+1',     color:'#f59e0b', bg:'#fef9c3', border:'#fde68a', filterFn: r => !!r.swift && r.swift.status === 'TIMEOUT'    && isT1(r)  && !!r.core },
   { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
   { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isT1(r)  },
-  { label: 'Chỉ Swift – không có NAPAS/Core', color:'#dc2626', bg:'#fef2f2', border:'#fecaca', tabOnly: true, filterFn: r => !!r.swift && !r.core && !r.napas && r.swift.status === 'THANH_CONG' },
-  { label: 'NAPAS thất bại (KTC) – không có Core', color:'#b91c1c', bg:'#fef2f2', border:'#fca5a5', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && r.napas.failed && r.swift.status === 'THANH_CONG' },
-  { label: 'NAPAS khớp TC ngày T – không có Core',   color:'#ea580c', bg:'#fff7ed', border:'#fed7aa', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && r.napas.date === r.swift.date },
-  { label: 'NAPAS khớp TC ngày T+1 – không có Core', color:'#0d9488', bg:'#f0fdfa', border:'#99f6e4', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && !!r.napas.date && !!r.swift.date && r.napas.date !== r.swift.date && ymd(r.swift.date) < ymd(r.napas.date) },
-  { label: 'NAPAS khớp TC ngày T-1 – không có Core', color:'#a16207', bg:'#fefce8', border:'#fde047', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && !!r.napas.date && !!r.swift.date && r.napas.date !== r.swift.date && ymd(r.napas.date) < ymd(r.swift.date) },
+  { label: 'Chỉ Swift – không có Core',   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
 ]
 
 /* Swift ↔ Core chiều Đến — TC/TO × T/T+1/T-1 + Thất bại + Chỉ Swift
@@ -103,11 +100,7 @@ export const SWIFT_COLS_DEN = [
   { label: 'Thất bại – ngày T',           color:'#6b7280', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && !isT1(r) },
   { label: 'Thất bại – ngày T+1',         color:'#9ca3af', bg:'#f9fafb', border:'#e5e7eb', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isRealTPlus1(r)  },
   { label: 'Thất bại – ngày T-1',         color:'#cbd5e1', bg:'#f8fafc', border:'#e2e8f0', filterFn: r => !!r.swift && r.swift.status === 'THAT_BAI'   && isRealTMinus1(r) },
-  { label: 'Chỉ Swift – không có NAPAS/Core', color:'#dc2626', bg:'#fef2f2', border:'#fecaca', tabOnly: true, filterFn: r => !!r.swift && !r.core && !r.napas && r.swift.status === 'THANH_CONG' },
-  { label: 'NAPAS thất bại (KTC) – không có Core', color:'#b91c1c', bg:'#fef2f2', border:'#fca5a5', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && r.napas.failed && r.swift.status === 'THANH_CONG' },
-  { label: 'NAPAS khớp TC ngày T – không có Core',   color:'#ea580c', bg:'#fff7ed', border:'#fed7aa', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && r.napas.date === r.swift.date },
-  { label: 'NAPAS khớp TC ngày T+1 – không có Core', color:'#0d9488', bg:'#f0fdfa', border:'#99f6e4', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && !!r.napas.date && !!r.swift.date && r.napas.date !== r.swift.date && ymd(r.swift.date) < ymd(r.napas.date) },
-  { label: 'NAPAS khớp TC ngày T-1 – không có Core', color:'#a16207', bg:'#fefce8', border:'#fde047', tabOnly: true, filterFn: r => !!r.swift && !r.core && !!r.napas && !r.napas.failed && r.swift.status === 'THANH_CONG' && !!r.napas.date && !!r.swift.date && r.napas.date !== r.swift.date && ymd(r.napas.date) < ymd(r.swift.date) },
+  { label: 'Chỉ Swift – không có Core',   color:'#dc2626', bg:'#fef2f2', border:'#fecaca', filterFn: r => !!r.swift && !r.core && r.swift.status === 'THANH_CONG' },
 ]
 
 /* CoreSummary Ghi có — Core là gốc (T), Swift và NAPAS so sánh tương đối.
