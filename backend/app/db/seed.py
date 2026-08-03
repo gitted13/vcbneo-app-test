@@ -816,7 +816,10 @@ def migrate_core_teller_rules():
                         continue
                     if "diễn_giải" not in data:
                         continue
-                    new_trace = _apply_transform(data.get("diễn_giải"), {"type": "dot_position"})
+                    new_trace = _apply_transform(
+                        data.get("diễn_giải"), {"type": "dot_position"},
+                        {"teller": data.get("teller")}, schema.get("teller_direction"),
+                    )
                     if new_trace and new_trace != data.get("trace"):
                         data["trace"] = new_trace
                         cur.execute(

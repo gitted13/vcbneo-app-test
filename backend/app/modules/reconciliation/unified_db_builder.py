@@ -17,7 +17,9 @@ from __future__ import annotations
 import json
 
 from app.db.connection import db_cursor
-from app.modules.reconciliation.engine_flex import _get_type_id, _load_rows, _make_key, resolve_type_ids
+from app.modules.reconciliation.engine_flex import (
+    _get_teller_direction_map, _get_type_id, _load_rows, _make_key, resolve_type_ids,
+)
 from app.modules.reconciliation.rows_builder import (
     _to_int, _to_str,
     _napas_time_fmt, _swift_status, _infer_recon_status,
@@ -139,6 +141,13 @@ def _build_from_db() -> list[dict]:
     swift_di_rows  = load_by_source('Swift', 'Đi')
     swift_den_rows = load_by_source('Swift', 'Đến')
     core_rows      = load_by_source('Core')
+    # Union teller_direction across every type tagged source=Core (usually
+    # just one) — same "don't hardcode a single type_id" reasoning as
+    # load_by_source above. A teller absent from every map matches neither
+    # pool below (excluded, not guessed).
+    core_teller_direction: dict[str, str] = {}
+    for tid in resolve_type_ids('Core', None):
+        core_teller_direction.update(_get_teller_direction_map(tid))
     napas_di_rows  = load_by_source('NAPAS', 'Đi')
     napas_den_rows = load_by_source('NAPAS', 'Đến')
     # napas_di_ktc (failed/KTC transactions) isn't part of the source+direction
@@ -187,16 +196,26 @@ def _build_from_db() -> list[dict]:
     # config's matchFields via JoinLogic changes this on the next request)
     napas_di_match  = _build_match_index(napas_di_rows, napas_di_fields)
     napas_den_match = _build_match_index(napas_den_rows, napas_den_fields)
-    core_cred_match = _build_match_index(
-        [r for r in core_rows if _to_int(r['data'].get('số_tiền_ghi_có'))], core_di_fields,
+    # Pool split is by teller (ABSOLUTE RULE — see engine_flex.py's
+    # _get_teller_direction_map docstring), NOT by which amount column is
+    # populated. Verified against real data: 39% of teller 5219/5220 rows
+    # (2397/6072) post their amount to số_tiền_ghi_có instead of ghi_nợ —
+    # the old credit/debit split silently routed those into the Đi pool.
+    # Amount extraction itself (_core_entry below) still reads whichever
+    # column is populated — that part was never wrong, only the pool split.
+    core_di_match = _build_match_index(
+        [r for r in core_rows if core_teller_direction.get(str(r['data'].get('teller'))) == 'Đi'],
+        core_di_fields,
     )
-    core_deb_match = _build_match_index(
-        [r for r in core_rows if _to_int(r['data'].get('số_tiền_ghi_nợ'))], core_den_fields,
+    core_den_match = _build_match_index(
+        [r for r in core_rows if core_teller_direction.get(str(r['data'].get('teller'))) == 'Đến'],
+        core_den_fields,
     )
 
     def _core_entry(d: dict) -> dict:
         return {'amount': _to_int(d.get('số_tiền_ghi_có')) or _to_int(d.get('số_tiền_ghi_nợ')) or 0,
-                'date': _parse_db_date(d.get('ngày_giao_dịch'))}
+                'date': _parse_db_date(d.get('ngày_giao_dịch')),
+                'entry': 'Ghi có' if _to_int(d.get('số_tiền_ghi_có')) else 'Ghi nợ'}
 
     # ── Build unified rows anchored on Swift ───────────────────────────────────
     rows: list[dict] = []
@@ -220,12 +239,10 @@ def _build_from_db() -> list[dict]:
         # T-1/T/T+1 offset classification via _infer_recon_status.
         day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
-        # Thử GHI CÓ trước, fallback sang GHI NỢ — Core có thể dùng bút toán nào cũng được
-        core_d = core_cred_match.get(_make_key(d, core_di_fields, "left")) if core_di_fields else None
-        core_entry = 'Ghi có'
-        if core_d is None and core_den_fields:
-            core_d = core_deb_match.get(_make_key(d, core_den_fields, "left"))
-            core_entry = 'Ghi nợ'
+        # Swift Đi chỉ match Core pool Đi (teller 5071) — không fallback
+        # sang pool Đến nữa, vì đó chính là cách nhầm 2397 dòng teller
+        # 5219/5220 (ghi_có) từng lọt vào đây trước khi sửa.
+        core_d = core_di_match.get(_make_key(d, core_di_fields, "left")) if core_di_fields else None
         core_e = _core_entry(core_d) if core_d is not None else None
 
         is_ktc = bool(trace and trace in napas_ktc_by_trace)
@@ -260,7 +277,7 @@ def _build_from_db() -> list[dict]:
             'amount':    amt,
             'day':       day,
             'swift':     {'date': swift_date, 'txnDate': txn_date, 'status': st},
-            'core':      {'date': core_e['date'], 'entry': core_entry} if core_e else None,
+            'core':      {'date': core_e['date'], 'entry': core_e['entry']} if core_e else None,
             'napas':     napas_dict,
             'recon_status': rs,
             'resolved_by': None, 'resolved_at': None, 'note': None,
@@ -281,12 +298,9 @@ def _build_from_db() -> list[dict]:
         st          = _swift_status(str(d.get('phản_hồi') or ''))
         day = _parse_db_date(d.get('_sheet_day')) or txn_date or swift_date or ''
 
-        # Thử GHI NỢ trước, fallback sang GHI CÓ
-        core_d = core_deb_match.get(_make_key(d, core_den_fields, "left")) if core_den_fields else None
-        core_entry = 'Ghi nợ'
-        if core_d is None and core_di_fields:
-            core_d = core_cred_match.get(_make_key(d, core_di_fields, "left"))
-            core_entry = 'Ghi có'
+        # Swift Đến chỉ match Core pool Đến (teller 5219/5220) — không
+        # fallback sang pool Đi.
+        core_d = core_den_match.get(_make_key(d, core_den_fields, "left")) if core_den_fields else None
         core_e = _core_entry(core_d) if core_d is not None else None
 
         n_d = napas_den_match.get(_make_key(d, napas_den_fields, "left")) if napas_den_fields else None
@@ -313,7 +327,7 @@ def _build_from_db() -> list[dict]:
             'amount':    amt,
             'day':       day,
             'swift':     {'date': swift_date, 'txnDate': txn_date, 'status': st},
-            'core':      {'date': core_e['date'], 'entry': core_entry} if core_e else None,
+            'core':      {'date': core_e['date'], 'entry': core_e['entry']} if core_e else None,
             'napas':     napas_dict,
             'recon_status': rs,
             'resolved_by': None, 'resolved_at': None, 'note': None,

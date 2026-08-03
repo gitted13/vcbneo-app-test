@@ -389,7 +389,7 @@ async def upload_file(
             # concat runs even when raw_val is None (it builds from row_ctx, not from source col).
             tr = col_def.get("transform")
             if tr and (raw_val is not None or tr.get("type") == "concat"):
-                raw_val = _apply_transform(raw_val, tr, row_json)
+                raw_val = _apply_transform(raw_val, tr, row_json, schema_obj.get("teller_direction"))
 
             # Required check
             excel_row_num = header_idx + row_idx + 2  # 1-based Excel row number
@@ -565,8 +565,10 @@ def _parse_value(raw, data_type: str):
 
 # ── Transform helpers ────────────────────────────────────────────────────────
 
-def _apply_transform(raw: Any, transform: dict, row_ctx: dict | None = None) -> Any:
-    """Apply a column-level transform. row_ctx holds already-processed fields in the current row."""
+def _apply_transform(raw: Any, transform: dict, row_ctx: dict | None = None, teller_direction: dict | None = None) -> Any:
+    """Apply a column-level transform. row_ctx holds already-processed fields in the current row.
+    teller_direction is the type's Core teller→Đi/Đến map (TellerDirectionEditor), used only by
+    dot_position to pick the right narrative layout without re-guessing from text shape."""
     t = transform.get("type")
 
     if t == "regex_extract":
@@ -613,25 +615,37 @@ def _apply_transform(raw: Any, transform: dict, row_ctx: dict | None = None) -> 
         # Extracts a trace-like number from text where its position relative
         # to "." varies by narrative format (confirmed against real Core
         # Banking data: teller 5071's format has it after the 2nd dot,
-        # teller 5219/5220's format has it right before the 1st dot) — checks
-        # BEFORE the 1st dot first (only succeeds if that segment actually
-        # ends in digits, e.g. "G/L408896" -> "408896"; a pure-letters
-        # segment like "CREDMBNEO" has no trailing digit run and falls
-        # through), then AFTER the 2nd dot. General/format-agnostic by
-        # design — doesn't hardcode "CREDMBNEO" or "G/L" as literal text, so
-        # it keeps working if a narrative prefix changes or a new teller
-        # appears using either of these two layouts.
+        # teller 5219/5220's format has it right before the 1st dot).
+        # Primary dispatch is by teller_direction (row_ctx['teller'] looked
+        # up in the type's teller→Đi/Đến map, already configured via
+        # TellerDirectionEditor — no separate UI needed) so a coincidental
+        # digit run can't misfire the wrong branch. Falls back to guessing
+        # from text shape when the teller isn't in the map (unknown teller,
+        # or map not configured) — same behavior as before this existed.
         s = str(raw) if raw is not None else ""
         parts = s.split(".")
-        if len(parts) >= 2:
-            m = re.search(r"(\d+)$", parts[0])
-            if m:
-                return m.group(1)
-        if len(parts) >= 3:
-            m = re.search(r"(\d+)", parts[2])
-            if m:
-                return m.group(1)
-        return None
+
+        def _before_1st_dot() -> str | None:
+            if len(parts) >= 2:
+                m = re.search(r"(\d+)$", parts[0])
+                if m:
+                    return m.group(1)
+            return None
+
+        def _after_2nd_dot() -> str | None:
+            if len(parts) >= 3:
+                m = re.search(r"(\d+)", parts[2])
+                if m:
+                    return m.group(1)
+            return None
+
+        teller = (row_ctx or {}).get("teller")
+        direction = (teller_direction or {}).get(str(teller).strip()) if teller is not None else None
+        if direction == "Đi":
+            return _after_2nd_dot() or _before_1st_dot()
+        if direction == "Đến":
+            return _before_1st_dot() or _after_2nd_dot()
+        return _before_1st_dot() or _after_2nd_dot()
 
     if t == "concat":
         ctx    = row_ctx or {}
