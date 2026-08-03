@@ -52,8 +52,9 @@ export default function NapasCore() {
 
   const base          = rows.filter(r => r.napas && r.direction === dir)
   const dateBase      = base.filter(r => {
-    if (filterFrom && r.day && dayToISO(r.day) < filterFrom) return false
-    if (filterTo   && r.day && dayToISO(r.day) > filterTo)   return false
+    const d = r.napas?.date
+    if (filterFrom && d && dayToISO(d) < filterFrom) return false
+    if (filterTo   && d && dayToISO(d) > filterTo)   return false
     return true
   })
   const filtered = dateBase.filter(r => {

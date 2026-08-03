@@ -85,8 +85,8 @@ export default function CoreSummary() {
   const KPI_FN = Object.fromEntries(activeCols.map((col, i) => [`col${i}`, col.filterFn]))
 
   const needsAction   = (r) => RESOLUTION_OF[r.recon_status]?.needsAction && !r.resolved_by
-  const inRange       = r => (!filterFrom || !r.day || dayToISO(r.day) >= filterFrom)
-                          && (!filterTo   || !r.day || dayToISO(r.day) <= filterTo)
+  const inRange       = r => (!filterFrom || !r.core?.date || dayToISO(r.core.date) >= filterFrom)
+                          && (!filterTo   || !r.core?.date || dayToISO(r.core.date) <= filterTo)
   const base     = rows.filter(r => r.direction === dir && r.core)
   const dateBase = base.filter(inRange)
 
