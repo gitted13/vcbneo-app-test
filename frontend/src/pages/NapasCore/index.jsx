@@ -165,7 +165,9 @@ export default function NapasCore() {
             ))}
           </Select>
           <Button size="sm" variant="subtle" onClick={handleExport}>↓ Xuất Excel</Button>
-          <Button size="sm" variant="subtle" onClick={handleExportRefundReport} title="NAPAS Đến đã báo TC nhưng Core chưa ghi có — không phụ thuộc tab Đi/Đến đang xem, luôn xuất chiều Đến">↓ Xuất DS chờ báo có KH</Button>
+          {dir === 'Đến' && (
+            <Button size="sm" variant="subtle" onClick={handleExportRefundReport}>↓ Tải DS GD cần hoàn trả</Button>
+          )}
         </div>
 
         <div style={{ overflowX: 'auto' }}>
