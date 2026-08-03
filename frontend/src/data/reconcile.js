@@ -104,13 +104,18 @@ export const CORE_COLS_DEN = [
     filterFn: r => !!r.core && !!r.swift && !r.napas },
 ]
 
-/* NAPAS ↔ Core chiều Đi — NAPAS không có timeout, chỉ TC/KTC
-   Lệch ngày: NAPAS ghi nhận ngày T-1 (type=QT), Core booking ngày T */
+/* NAPAS ↔ Core chiều Đi — NAPAS là gốc (T), Core so sánh tương đối (giống
+   NAPAS_COLS_DEN bên dưới — trước đây neo "T" theo Core, ngược với "NAPAS
+   (nguồn gốc)" hiển thị trên UI, đã sửa lại nhãn cho nhất quán, filterFn
+   giữ nguyên vì điều kiện vẫn đúng, chỉ chữ hiển thị bị ngược). NAPAS
+   không có timeout, chỉ TC/KTC. */
 export const NAPAS_COLS_DI = [
-  { label: 'Thành công – NAPAS ngày T-1, Core ngày T', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
-    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.napas.date) < ymd(r.core.date) },
+  { label: 'Thành công – NAPAS ngày T, Core ngày T-1', color:'#7c3aed', bg:'#f5f3ff', border:'#ddd6fe',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.core.date) < ymd(r.napas.date) },
   { label: 'Thành công – NAPAS ngày T, Core ngày T',   color:'#059669', bg:'#f0fdf4', border:'#bbf7d0',
     filterFn: r => !!r.napas && !r.napas.failed && !!r.core && r.napas.date === r.core.date },
+  { label: 'Thành công – NAPAS ngày T, Core ngày T+1', color:'#0891b2', bg:'#ecfeff', border:'#a5f3fc',
+    filterFn: r => !!r.napas && !r.napas.failed && !!r.core && ymd(r.napas.date) < ymd(r.core.date) },
   { label: 'Không thành công (KTC)',                    color:'#dc2626', bg:'#fef2f2', border:'#fecaca',
     filterFn: r => !!r.napas && r.napas.failed },
   { label: 'Chỉ NAPAS TC – không có Core',              color:'#d97706', bg:'#fffbeb', border:'#fde68a',
