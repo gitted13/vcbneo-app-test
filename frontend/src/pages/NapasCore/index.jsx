@@ -84,7 +84,7 @@ export default function NapasCore() {
     color: C.textMuted, background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}`,
     textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap', ...extra,
   })
-  const COLS = 11
+  const COLS = 12
 
   const coreLabel  = dir === 'Đi' ? 'GHI CÓ' : 'GHI NỢ'
   const coreColor  = dir === 'Đi' ? '#166534' : '#1e40af'
@@ -147,7 +147,7 @@ export default function NapasCore() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                <th colSpan={6} style={{ background: '#fefce8', borderBottom: '1px solid #fde68a', padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#854d0e' }}>
+                <th colSpan={7} style={{ background: '#fefce8', borderBottom: '1px solid #fde68a', padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: '#854d0e' }}>
                   NAPAS (nguồn gốc)
                 </th>
                 <th colSpan={2} style={{ padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, background: coreBg, color: coreColor, borderBottom: `1px solid ${coreBorder}`, borderLeft: `2px solid ${coreAcc}` }}>
@@ -157,6 +157,7 @@ export default function NapasCore() {
               </tr>
               <tr>
                 <th style={th()}>#</th>
+                <th style={th({ background: '#fef3c7' })} title="Ngày dùng để lọc theo khoảng ngày ở trên — lấy theo sheet file gốc, có thể khác Ngày GD với giao dịch quyết toán qua đêm (QT)">Ngày file</th>
                 <th style={th()}>Trace</th>
                 <th style={th({ background: '#fefce8' })}>Ngày GD</th>
                 <th style={th({ background: '#fefce8' })}>Ngày giờ GD</th>
@@ -182,6 +183,7 @@ export default function NapasCore() {
                   <>
                     <tr key={r.id}>
                       <td style={td({ color: C.textMuted, fontSize: 11 })}>{(page - 1) * pageSize + i + 1}</td>
+                      <td style={td({ fontSize: 11, color: '#92400e', whiteSpace: 'nowrap' })}>{r.day || '—'}</td>
                       <td style={td({ fontFamily: 'monospace', color: C.primary, fontWeight: 600, fontSize: 12, background: nBg })}>{r.trace}</td>
                       <td style={td({ background: nBg, fontSize: 12, color: C.textMuted, whiteSpace: 'nowrap' })}>
                         {r.napas?.date ?? '—'}

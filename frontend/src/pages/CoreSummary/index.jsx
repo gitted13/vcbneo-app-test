@@ -119,7 +119,7 @@ export default function CoreSummary() {
     color: C.textMuted, background: C.neutralBg, borderBottom: `1px solid ${C.cardBorder}`,
     textTransform: 'uppercase', letterSpacing: 0.4, whiteSpace: 'nowrap', ...extra,
   })
-  const COLS = 12
+  const COLS = 13
 
   const handleExport = async () => {
     const STATUS = { THANH_CONG: 'Thành công', TIMEOUT: 'Timeout', THAT_BAI: 'Thất bại' }
@@ -172,7 +172,7 @@ export default function CoreSummary() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr>
-                <th colSpan={5} style={{ background: opt.bg, borderBottom: `1px solid ${opt.border}`, padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: opt.color }}>
+                <th colSpan={6} style={{ background: opt.bg, borderBottom: `1px solid ${opt.border}`, padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: opt.color }}>
                   CORE {entry.toUpperCase()} (nguồn gốc)
                 </th>
                 <th colSpan={2} style={{ padding: '5px 12px', textAlign: 'center', fontSize: 11, fontWeight: 700, letterSpacing: 0.6, background: '#dbeafe', color: '#1e40af', borderBottom: '1px solid #bfdbfe', borderLeft: '2px solid #93c5fd' }}>SWIFT</th>
@@ -181,6 +181,7 @@ export default function CoreSummary() {
               </tr>
               <tr>
                 <th style={th()}>#</th>
+                <th style={th({ background: opt.bg })} title="Ngày dùng để lọc theo khoảng ngày ở trên — lấy theo sheet file gốc, có thể khác Ngày Core với giao dịch quyết toán qua đêm">Ngày file</th>
                 <th style={th()}>Trace</th>
                 <th style={th()}>Sequence</th>
                 <th style={th({ background: opt.bg })}>Ngày Core</th>
@@ -209,6 +210,7 @@ export default function CoreSummary() {
                   <>
                     <tr key={r.id}>
                       <td style={td({ color: C.textMuted, fontSize: 11 })}>{(page - 1) * pageSize + i + 1}</td>
+                      <td style={td({ fontSize: 11, color: opt.color, whiteSpace: 'nowrap' })}>{r.day || '—'}</td>
                       <td style={td({ fontFamily: 'monospace', color: C.primary, fontWeight: 600, fontSize: 12 })}>{r.trace}</td>
                       <td style={td({ fontFamily: 'monospace', color: C.textMuted, fontSize: 11 })}>{r.sequence ?? '—'}</td>
                       <td style={td({ background: corBg, fontSize: 12, color: C.textMuted, fontWeight: 600 })}>{r.core?.date ?? '—'}</td>
