@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.config import settings
 from app.api.v1.router import api_router
@@ -59,6 +60,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# /reconcile/db-rows trả về toàn bộ dataset không phân trang (xem CLAUDE.md —
+# cố ý, vì filterFn phía frontend không portable) — payload thực đo được
+# ~8.4MB trên data thật, JSON nén rất tốt (70-90%), nên bật gzip để giảm
+# thời gian truyền qua mạng thay vì phải phân trang lại toàn bộ 4 trang
+# đang dùng endpoint này.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(api_router, prefix="/api/v1")
 
